@@ -1,0 +1,4 @@
+.claude/
+publish/
+.DS_Store
+__pycache__/

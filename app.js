@@ -1,0 +1,1099 @@
+/* DOT — projects + infinite dotted canvas (draft 2) */
+(() => {
+  'use strict';
+
+  const $ = (s, r = document) => r.querySelector(s);
+  const BASE_W = 240;                    // every media thumbnail starts this wide
+  const DEFAULT_AR = 4 / 5;              // until the real ratio is known
+  const GRID = 24;                       // on-screen dot spacing (static while zooming)
+  const MIN_Z = 0.1, MAX_Z = 4, MIN_W = 80;
+  const TEXT = {
+    heading:    { w: 520, label: 'Heading',    ph: 'Heading' },
+    subheading: { w: 440, label: 'Subheading', ph: 'Subheading' },
+    paragraph:  { w: 380, label: 'Paragraph',  ph: 'Write something…' },
+  };
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const EMBEDDED = (() => { try { return window.self !== window.top; } catch { return true; } })();
+  const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+
+  /* ---------------- Icons ---------------- */
+  const svg = (p, sw = 1.8) =>
+    `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="${sw}" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
+  const I = {
+    home: svg('<path d="M4 10.5 12 4l8 6.5V19a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19z"/>'),
+    target: svg('<circle cx="12" cy="12" r="7"/><circle cx="12" cy="12" r="2.6"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2"/>'),
+    library: svg('<rect x="3.5" y="4" width="17" height="16" rx="3"/><path d="M3.5 15.5 8.5 11l4 3.5 3-2.5 4.5 3.5"/><circle cx="15.5" cy="8.5" r="1.4"/>'),
+    settings: svg('<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>'),
+    grid: svg('<circle cx="6" cy="6" r="1.3" fill="currentColor"/><circle cx="12" cy="6" r="1.3" fill="currentColor"/><circle cx="18" cy="6" r="1.3" fill="currentColor"/><circle cx="6" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="18" cy="12" r="1.3" fill="currentColor"/><circle cx="6" cy="18" r="1.3" fill="currentColor"/><circle cx="12" cy="18" r="1.3" fill="currentColor"/><circle cx="18" cy="18" r="1.3" fill="currentColor"/>', 0),
+    image: svg('<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><circle cx="9" cy="9" r="1.6"/><path d="m20.5 15-4.5-4.5L6 20.5"/>'),
+    video: svg('<rect x="2.5" y="5.5" width="14" height="13" rx="3"/><path d="m16.5 10.5 5-3v9l-5-3"/>'),
+    link: svg('<path d="M10 14a4.5 4.5 0 0 0 6.4 0l3-3a4.5 4.5 0 0 0-6.4-6.4l-1 1"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3 3a4.5 4.5 0 0 0 6.4 6.4l1-1"/>'),
+    upload: svg('<path d="M12 15V4M7.5 8.5 12 4l4.5 4.5"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/>'),
+    play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>',
+    open: svg('<path d="M14 4h6v6M20 4l-8 8M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>'),
+    front: svg('<rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/>'),
+    trash: svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12.5A1.5 1.5 0 0 0 8.5 21h7a1.5 1.5 0 0 0 1.5-1.5L18 7M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7"/>'),
+    edit: svg('<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/>'),
+    fit: svg('<path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/>', 2),
+    select: svg('<path d="M5 3.5 18.5 10l-6 1.8L10 18z" fill="currentColor"/>', 1.6),
+    hand: svg('<path d="M8 12V5.5a1.5 1.5 0 0 1 3 0V11M11 10.5v-6a1.5 1.5 0 0 1 3 0v6M14 10.5V6a1.5 1.5 0 0 1 3 0v7.5a6.5 6.5 0 0 1-6.5 6.5h-.6a6 6 0 0 1-4.6-2.2L4 15.5a1.6 1.6 0 0 1 2.4-2.1L8 15"/>'),
+    locate: svg('<circle cx="12" cy="12" r="6.5"/><circle cx="12" cy="12" r="2" fill="currentColor"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3"/>'),
+    text: svg('<path d="M5 6.5V5h14v1.5M12 5v14M9.5 19h5"/>'),
+    heading: svg('<path d="M6 5v14M16 5v14M6 12h10"/>', 2.2),
+    subheading: svg('<path d="M5 7v10M13 7v10M5 12h8M17 11.5l2.5-1.5V17"/>'),
+    paragraph: svg('<path d="M4 6.5h16M4 11h16M4 15.5h16M4 20h9"/>'),
+    duplicate: svg('<rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6A2.5 2.5 0 0 0 13 3.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5M14.5 12v5M12 14.5h5"/>'),
+    copy: svg('<rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6A2.5 2.5 0 0 0 13 3.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5"/>'),
+    paste: svg('<path d="M9 4.5H6.5A2 2 0 0 0 4.5 6.5v12a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-12a2 2 0 0 0-2-2H15"/><rect x="9" y="3" width="6" height="3.5" rx="1"/>'),
+    cut: svg('<circle cx="6.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/><path d="M8.5 16 18 4M15.5 16 6 4"/>'),
+    newProject: svg('<path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>'),
+  };
+  document.querySelectorAll('[data-icon]').forEach(el => { el.innerHTML = I[el.dataset.icon] || ''; });
+
+  /* ---------------- IndexedDB ---------------- */
+  const db = (() => {
+    let dbp;
+    const mem = { projects: new Map(), items: new Map() };
+    const open = () => dbp || (dbp = new Promise((res, rej) => {
+      let req;
+      try { req = indexedDB.open('dot-app', 1); } catch (e) { return rej(e); }
+      req.onupgradeneeded = () => {
+        const d = req.result;
+        d.createObjectStore('projects', { keyPath: 'id' });
+        d.createObjectStore('items', { keyPath: 'id' }).createIndex('projectId', 'projectId');
+      };
+      req.onsuccess = () => res(req.result);
+      req.onerror = () => rej(req.error);
+    }).catch(() => null));                // storage unavailable: keep working in memory for this visit
+    const memOp = (store, op, v) => {
+      const m = mem[store];
+      if (op === 'all') return [...m.values()];
+      if (op === 'put') m.set(v.id, v); else m.delete(v);
+    };
+    const tx = async (store, mode, fn, op, v) => {
+      const d = await open();
+      if (!d) return memOp(store, op, v);
+      return new Promise((res, rej) => {
+        const t = d.transaction(store, mode);
+        const r = fn(t.objectStore(store));
+        t.oncomplete = () => res(r ? r.result : undefined);
+        t.onerror = () => rej(t.error);
+      });
+    };
+    return {
+      all: store => tx(store, 'readonly', s => s.getAll(), 'all').catch(() => memOp(store, 'all')),
+      put: (store, v) => tx(store, 'readwrite', s => s.put(v), 'put', v).catch(() => memOp(store, 'put', v)),
+      del: (store, id) => tx(store, 'readwrite', s => s.delete(id), 'del', id).catch(() => memOp(store, 'del', id)),
+    };
+  })();
+
+  /* ---------------- State ---------------- */
+  const state = { projects: [], items: [], current: null, sel: new Set(), topZ: 1, tool: 'select', space: false };
+  let view = { x: 0, y: 0, z: 1 };
+  const bg = { x: 0, y: 0 };             // dot-grid offset: follows panning, ignores zooming
+  const urls = new Map();
+  const srcOf = it => {
+    if (!it.blob) return it.url;
+    if (!urls.has(it.id)) urls.set(it.id, URL.createObjectURL(it.blob));
+    return urls.get(it.id);
+  };
+  const project = () => state.projects.find(p => p.id === state.current);
+  const itemsHere = () => state.items.filter(i => i.projectId === state.current);
+  const itemById = id => state.items.find(i => i.id === id);
+  const elOf = id => world.querySelector(`.item[data-id="${id}"]`);
+
+  function normalize(it) {
+    if (it.kind === 'text') { if (!it.w) it.w = TEXT[it.variant].w; }
+    else {
+      if (!it.w) it.w = BASE_W;
+      if (!it.h) it.h = Math.round(it.w / (it.ar || DEFAULT_AR));
+    }
+    return it;
+  }
+  const boxOf = it => ({ w: it.w, h: it.kind === 'text' ? (elOf(it.id)?.offsetHeight || 60) : it.h });
+
+  const canvas = $('#canvas'), world = $('#world'), stage = $('#stage');
+
+  /* ---------------- Video link parsing ---------------- */
+  function parseVideo(url) {
+    let u;
+    try { u = new URL(url); } catch { return null; }
+    if (!/^https?:$/.test(u.protocol)) return null;
+    const h = u.hostname.replace(/^(www\.|m\.)/, '');
+    let id = null;
+    if (h === 'youtu.be') id = u.pathname.slice(1).split('/')[0];
+    else if (h.endsWith('youtube.com')) id = u.searchParams.get('v') || (u.pathname.match(/\/(shorts|embed|live)\/([^/?#]+)/) || [])[2];
+    if (id) return { provider: 'YouTube', thumb: `https://i.ytimg.com/vi/${id}/hqdefault.jpg`, ar: /\/shorts\//.test(u.pathname) ? 9 / 16 : 16 / 9, embed: `https://www.youtube-nocookie.com/embed/${id}?autoplay=1` };
+    if (h.endsWith('vimeo.com')) {
+      const m = u.pathname.match(/(\d{5,})/);
+      if (m) return { provider: 'Vimeo', ar: 16 / 9, embed: `https://player.vimeo.com/video/${m[1]}?autoplay=1` };
+    }
+    if (/\.(mp4|webm|mov|m4v|ogv)$/i.test(u.pathname)) return { provider: 'file' };
+    return { provider: h };
+  }
+  const isHttpUrl = s => { try { return /^https?:$/.test(new URL(s).protocol); } catch { return false; } };
+  const hostOf = url => { try { return new URL(url).hostname; } catch { return ''; } };
+
+  /* ---------------- View ---------------- */
+  function applyView() {
+    world.style.transform = `translate(${view.x}px, ${view.y}px) scale(${view.z})`;
+    world.style.setProperty('--iz', 1 / view.z);
+    canvas.style.backgroundPosition = `${bg.x - GRID / 2}px ${bg.y - GRID / 2}px`;
+    $('#zoomReset').textContent = Math.round(view.z * 100) + '%';
+    saveViewSoon();
+  }
+  let viewTimer;
+  function saveViewSoon() {
+    clearTimeout(viewTimer);
+    viewTimer = setTimeout(() => {
+      const p = project();
+      if (p) { p.view = { ...view }; db.put('projects', p); }
+    }, 300);
+  }
+  const rect = () => canvas.getBoundingClientRect();
+  const toWorld = (cx, cy) => { const r = rect(); return { x: (cx - r.left - view.x) / view.z, y: (cy - r.top - view.y) / view.z }; };
+  function pan(dx, dy) { view.x += dx; view.y += dy; bg.x += dx; bg.y += dy; applyView(); }
+  function zoomAt(sx, sy, factor) {
+    const nz = clamp(view.z * factor, MIN_Z, MAX_Z);
+    const k = nz / view.z;
+    view.x = sx - (sx - view.x) * k;
+    view.y = sy - (sy - view.y) * k;
+    view.z = nz;
+    applyView();
+  }
+  const zoomCenter = f => { const r = rect(); zoomAt(r.width / 2, r.height / 2, f); };
+
+  let anim = 0;
+  function animateTo(target, ms = 450) {
+    cancelAnimationFrame(anim);
+    const from = { ...view }, t0 = performance.now();
+    const ease = t => 1 - Math.pow(1 - t, 3);
+    const step = now => {
+      const t = Math.min(1, (now - t0) / ms), e = ease(t);
+      view = { x: from.x + (target.x - from.x) * e, y: from.y + (target.y - from.y) * e, z: from.z + (target.z - from.z) * e };
+      applyView();
+      if (t < 1) anim = requestAnimationFrame(step);
+    };
+    anim = requestAnimationFrame(step);
+  }
+  function resetView() { const r = rect(); view = { x: r.width / 2, y: r.height / 2, z: 1 }; applyView(); }
+  function fitView(its, maxZ = 1) {
+    const r = rect(), pad = 80;
+    const bx = its.map(i => ({ ...boxOf(i), x: i.x, y: i.y }));
+    const minX = Math.min(...bx.map(b => b.x)), minY = Math.min(...bx.map(b => b.y));
+    const maxX = Math.max(...bx.map(b => b.x + b.w)), maxY = Math.max(...bx.map(b => b.y + b.h));
+    const z = clamp(Math.min((r.width - pad * 2) / (maxX - minX), (r.height - pad * 2) / (maxY - minY)), MIN_Z, maxZ);
+    return { z, x: r.width / 2 - ((minX + maxX) / 2) * z, y: r.height / 2 - ((minY + maxY) / 2) * z };
+  }
+  function fitAll(animated = true) {
+    const its = itemsHere();
+    if (!its.length) return resetView();
+    const t = fitView(its);
+    animated ? animateTo(t) : (view = t, applyView());
+  }
+
+  // Snap a world point so its on-screen position lands on a visible dot.
+  function snapWorld(x, y) {
+    const sx = view.x + x * view.z, sy = view.y + y * view.z;
+    const nx = bg.x + Math.round((sx - bg.x) / GRID) * GRID;
+    const ny = bg.y + Math.round((sy - bg.y) / GRID) * GRID;
+    return { x: (nx - view.x) / view.z, y: (ny - view.y) / view.z };
+  }
+
+  /* ---------------- Last edited ---------------- */
+  function touch(id) {
+    const p = project();
+    if (!p || !id) return;
+    p.lastEdited = id;
+    db.put('projects', p);
+    $('#locate').classList.remove('disabled');
+  }
+  function goToLastEdited() {
+    const p = project();
+    const here = itemsHere();
+    let it = p && itemById(p.lastEdited);
+    if (!it || it.projectId !== state.current) it = here.sort((a, b) => b.createdAt - a.createdAt)[0];
+    if (!it) return toast('Nothing on this canvas yet');
+    const r = rect(), b = boxOf(it);
+    const z = clamp(Math.min(1, (r.width * 0.6) / b.w, (r.height * 0.6) / b.h), MIN_Z, MAX_Z);
+    animateTo({ z, x: r.width / 2 - (it.x + b.w / 2) * z, y: r.height / 2 - (it.y + b.h / 2) * z });
+    setSelection([it.id]);
+    const el = elOf(it.id);
+    if (el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
+  }
+
+  /* ---------------- Projects panel ---------------- */
+  function renderProjects() {
+    const list = $('#projectList');
+    list.innerHTML = '';
+    for (const p of state.projects) {
+      const n = state.items.filter(i => i.projectId === p.id).length;
+      const row = document.createElement('button');
+      row.className = 'project' + (p.id === state.current ? ' active' : '');
+      row.dataset.id = p.id;
+      row.innerHTML = `<span class="p-icon">${I.grid}</span><span class="p-name"></span><span class="count">${n}</span>`;
+      row.querySelector('.p-name').textContent = p.name;
+      row.addEventListener('click', () => { if (p.id !== state.current) openProject(p.id); });
+      row.addEventListener('dblclick', () => startRename(p.id));
+      row.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        openCtx(e.clientX, e.clientY, [
+          { label: 'Rename', icon: I.edit, action: () => startRename(p.id) },
+          'sep',
+          { label: 'Delete project', icon: I.trash, danger: true, action: () => deleteProject(p.id) },
+        ]);
+      });
+      list.append(row);
+    }
+    const p = project();
+    $('#crumbName').textContent = p ? p.name : '—';
+    const here = itemsHere();
+    $('#crumbCount').textContent = here.length ? plural(here.length, 'item') : '';
+    $('#statImages').textContent = here.filter(i => i.kind === 'image').length;
+    $('#statVideos').textContent = here.filter(i => i.kind === 'video').length;
+    $('#statText').textContent = here.filter(i => i.kind === 'text').length;
+    $('#empty').hidden = here.length > 0;
+    $('#locate').classList.toggle('disabled', !here.length);
+  }
+
+  function startRename(id) {
+    const row = $(`.project[data-id="${id}"]`);
+    const p = state.projects.find(x => x.id === id);
+    if (!row || !p) return;
+    const nameEl = row.querySelector('.p-name');
+    const input = document.createElement('input');
+    input.value = p.name;
+    nameEl.replaceWith(input);
+    input.focus(); input.select();
+    let done = false;
+    const commit = save => {
+      if (done) return; done = true;
+      const v = input.value.trim();
+      if (save && v) { p.name = v; db.put('projects', p); }
+      renderProjects();
+    };
+    input.addEventListener('keydown', e => {
+      e.stopPropagation();
+      if (e.key === 'Enter') commit(true);
+      if (e.key === 'Escape') commit(false);
+    });
+    input.addEventListener('blur', () => commit(true));
+    input.addEventListener('click', e => e.stopPropagation());
+  }
+
+  async function addProject(name = 'Untitled Project', rename = true) {
+    const p = { id: uid(), name, createdAt: Date.now(), view: null, lastEdited: null };
+    state.projects.push(p);
+    await db.put('projects', p);
+    openProject(p.id);
+    if (rename) startRename(p.id);
+    return p;
+  }
+
+  async function deleteProject(id) {
+    const p = state.projects.find(x => x.id === id);
+    const n = state.items.filter(i => i.projectId === id).length;
+    const ok = await confirmDialog({
+      title: `Delete “${p.name}”?`,
+      body: `${n ? `Its ${plural(n, 'item')} will be removed too. ` : ''}This can't be undone.`,
+      ok: 'Delete project',
+    });
+    if (!ok) return;
+    for (const it of state.items.filter(i => i.projectId === id)) await removeItem(it.id, false);
+    state.projects = state.projects.filter(x => x.id !== id);
+    await db.del('projects', id);
+    if (!state.projects.length) return addProject('My First Project', false);
+    if (state.current === id) openProject(state.projects[0].id);
+    else renderProjects();
+  }
+
+  function openProject(id) {
+    state.current = id;
+    state.sel = new Set();
+    try { localStorage.setItem('dot.current', id); } catch {}
+    renderProjects();
+    renderItems();
+    const p = project();
+    if (p.view) { view = { ...p.view }; applyView(); }
+    else if (itemsHere().length) requestAnimationFrame(() => fitAll(false));
+    else resetView();
+  }
+
+  async function projectFromSelection() {
+    const src = [...state.sel].map(itemById).filter(Boolean);
+    if (!src.length) return;
+    const cur = project();
+    const p = { id: uid(), name: `${cur.name} — selection`, createdAt: Date.now(), view: null, lastEdited: null };
+    state.projects.push(p);
+    await db.put('projects', p);
+    for (const it of src.sort((a, b) => (a.z || 0) - (b.z || 0))) {
+      const copy = { ...it, id: uid(), projectId: p.id, createdAt: Date.now() };
+      state.items.push(copy);
+      await db.put('items', copy);
+    }
+    renderProjects();
+    toast(`Created “${p.name}” with ${plural(src.length, 'item')}`, { label: 'Open', action: () => openProject(p.id) });
+  }
+
+  /* ---------------- Items ---------------- */
+  function renderItems() {
+    world.innerHTML = '';
+    const its = itemsHere().sort((a, b) => (a.z || 0) - (b.z || 0));
+    state.topZ = Math.max(1, ...its.map(i => i.z || 0));
+    its.forEach(it => world.append(itemEl(it)));
+    syncSel();
+  }
+
+  function place(el, it) {
+    el.style.left = it.x + 'px';
+    el.style.top = it.y + 'px';
+    el.style.width = it.w + 'px';
+    if (it.kind !== 'text') el.style.height = it.h + 'px';
+    el.style.zIndex = it.z || 0;
+  }
+
+  // Lock the card to the media's real aspect ratio (width stays, height follows).
+  function setRatio(it, el, ar) {
+    if (!ar || !isFinite(ar)) return;
+    if (it.ar && Math.abs(it.ar - ar) < 0.002) return;
+    it.ar = ar;
+    it.h = Math.round(it.w / ar);
+    place(el, it);
+    db.put('items', it);
+  }
+
+  function itemEl(it) {
+    const el = document.createElement('div');
+    el.dataset.id = it.id;
+
+    if (it.kind === 'text') {
+      el.className = `item text t-${it.variant}`;
+      const t = document.createElement('div');
+      t.className = 'txt';
+      t.dataset.ph = TEXT[it.variant].ph;
+      t.textContent = it.text || '';
+      t.addEventListener('keydown', ev => {
+        ev.stopPropagation();
+        if (ev.key === 'Escape' || (ev.key === 'Enter' && it.variant !== 'paragraph' && !ev.shiftKey)) { ev.preventDefault(); endEdit?.(); }
+      });
+      el.append(t);
+    } else {
+      el.className = 'item card';
+      el.title = it.name || '';
+      const media = document.createElement('div');
+      media.className = 'media';
+      const placeholder = (title, sub) => {
+        const ph = document.createElement('div');
+        ph.className = 'ph';
+        ph.innerHTML = `<div style="width:28px;height:28px">${it.kind === 'video' ? I.video : I.image}</div><b></b><span></span>`;
+        ph.querySelector('b').textContent = title;
+        ph.querySelector('span').textContent = sub || '';
+        return ph;
+      };
+
+      if (it.kind === 'image') {
+        const img = new Image();
+        img.draggable = false;
+        img.onload = () => setRatio(it, el, img.naturalWidth / img.naturalHeight);
+        img.onerror = () => { img.remove(); media.append(placeholder("Couldn't load image", hostOf(it.url))); };
+        img.src = srcOf(it);
+        media.append(img);
+      } else {
+        const v = it.blob ? { provider: 'file' } : parseVideo(it.url) || { provider: 'link' };
+        if (v.provider === 'file') {
+          const vid = document.createElement('video');
+          vid.muted = true; vid.loop = true; vid.playsInline = true; vid.preload = 'metadata';
+          vid.onloadedmetadata = () => setRatio(it, el, vid.videoWidth / vid.videoHeight);
+          vid.onerror = () => { vid.remove(); media.prepend(placeholder("Couldn't load video", hostOf(it.url))); };
+          vid.src = srcOf(it) + '#t=0.1';
+          el.addEventListener('pointerenter', () => { vid.play().then(() => el.classList.add('is-playing')).catch(() => {}); });
+          el.addEventListener('pointerleave', () => { vid.pause(); el.classList.remove('is-playing'); });
+          media.append(vid);
+        } else {
+          if (v.ar) setTimeout(() => setRatio(it, el, v.ar));
+          if (v.thumb) {
+            const img = new Image();
+            img.draggable = false;
+            img.onerror = () => { img.remove(); media.prepend(placeholder(v.provider, 'Double-click to open')); };
+            img.src = v.thumb;
+            media.append(img);
+          } else media.append(placeholder(v.provider, 'Double-click to open'));
+        }
+        const play = document.createElement('div');
+        play.className = 'play';
+        play.innerHTML = I.play;
+        media.append(play);
+      }
+      const badge = document.createElement('div');
+      badge.className = 'badge';
+      badge.textContent = it.kind === 'image' ? (it.blob ? 'Image' : 'Image link') : (it.blob ? 'Video' : 'Video link');
+      el.append(media, badge);
+    }
+
+    for (const c of ['nw', 'ne', 'sw', 'se']) {
+      const h = document.createElement('div');
+      h.className = `handle h-${c}`;
+      h.dataset.corner = c;
+      el.append(h);
+    }
+    place(el, it);
+    return el;
+  }
+
+  async function addItem(data, at) {
+    const it = normalize({ id: uid(), projectId: state.current, createdAt: Date.now(), z: ++state.topZ, blob: null, url: null, name: '', ...data });
+    if (it.kind === 'text') { it.x = Math.round(at.x); it.y = Math.round(at.y); }
+    else { it.x = Math.round(at.x - it.w / 2); it.y = Math.round(at.y - it.h / 2); }
+    state.items.push(it);
+    await db.put('items', it);
+    const el = itemEl(it);
+    world.append(el);
+    setSelection([it.id]);
+    touch(it.id);
+    renderProjects();
+    return { it, el };
+  }
+
+  async function removeItem(id, rerender = true) {
+    state.items = state.items.filter(i => i.id !== id);
+    if (urls.has(id)) { URL.revokeObjectURL(urls.get(id)); urls.delete(id); }
+    await db.del('items', id);
+    state.sel.delete(id);
+    if (rerender) { elOf(id)?.remove(); syncSel(); renderProjects(); }
+  }
+  async function removeSelected() {
+    const ids = [...state.sel];
+    for (const id of ids) await removeItem(id);
+  }
+
+  function setSelection(ids) { state.sel = new Set(ids); syncSel(); }
+  function syncSel() {
+    world.querySelectorAll('.item').forEach(el => el.classList.toggle('selected', state.sel.has(el.dataset.id)));
+    world.classList.toggle('multi', state.sel.size > 1);
+  }
+
+  function bringToFront(ids) {
+    ids.map(itemById).filter(Boolean).sort((a, b) => (a.z || 0) - (b.z || 0)).forEach(it => {
+      if ((it.z || 0) === state.topZ && ids.length === 1) return;
+      it.z = ++state.topZ;
+      const el = elOf(it.id);
+      if (el) el.style.zIndex = it.z;
+      db.put('items', it);
+    });
+  }
+
+  /* ---------------- Duplicate / copy / paste ---------------- */
+  let clipboard = [];                    // snapshots of copied items (blob files included)
+  let clipStamp = '';                    // marker written to the system clipboard on copy
+  let pointer = null;                    // last cursor position over the canvas
+  let lastPaste = { key: '', n: 0 };
+  canvas.addEventListener('pointermove', e => { pointer = { x: e.clientX, y: e.clientY }; });
+  canvas.addEventListener('pointerleave', () => { pointer = null; });
+  const selectedItems = () => [...state.sel].map(itemById).filter(Boolean);
+  const viewCenter = () => { const r = rect(); return toWorld(r.left + r.width / 2, r.top + r.height / 2); };
+
+  // Every copy is a full, independent item: uploaded files are stored again with the copy.
+  // Synchronous so Option/Alt-drag can swap to the copies mid-gesture; saving happens in the background.
+  function makeClones(srcs, dx = 0, dy = 0) {
+    return [...srcs].sort((a, b) => (a.z || 0) - (b.z || 0)).map(src => {
+      const it = { ...src, id: uid(), projectId: state.current, createdAt: Date.now(), z: ++state.topZ,
+        x: Math.round(src.x + dx), y: Math.round(src.y + dy) };
+      state.items.push(it);
+      db.put('items', it);
+      world.append(itemEl(it));
+      return it;
+    });
+  }
+  async function cloneItems(srcs, dx, dy) {
+    const made = makeClones(srcs, dx, dy);
+    setSelection(made.map(i => i.id));
+    if (made.length) touch(made[made.length - 1].id);
+    renderProjects();
+    return made;
+  }
+
+  function duplicate() {
+    const s = selectedItems();
+    if (s.length) cloneItems(s, GRID / view.z, GRID / view.z);
+  }
+  function copySelection(quiet) {
+    const s = selectedItems();
+    if (!s.length) return false;
+    clipboard = s.map(i => ({ ...i }));
+    lastPaste = { key: '', n: 0 };
+    if (!quiet) toast(`Copied ${plural(s.length, 'item')} — ⌘V to paste`);
+    return true;
+  }
+  // Paste keeps the group's layout and centres it on `at` (cursor, right-click point or view centre).
+  function pasteAt(at) {
+    if (!clipboard.length) return;
+    const bx = clipboard.map(i => ({ x: i.x, y: i.y, ...boxOf(i) }));
+    const cx = (Math.min(...bx.map(b => b.x)) + Math.max(...bx.map(b => b.x + b.w))) / 2;
+    const cy = (Math.min(...bx.map(b => b.y)) + Math.max(...bx.map(b => b.y + b.h))) / 2;
+    const key = `${state.current}:${Math.round(at.x)}:${Math.round(at.y)}`;
+    lastPaste = key === lastPaste.key ? { key, n: lastPaste.n + 1 } : { key, n: 0 };
+    const step = lastPaste.n * GRID / view.z;            // repeated pastes on the same spot cascade
+    cloneItems(clipboard, at.x - cx + step, at.y - cy + step);
+  }
+  const pastePoint = () => pointer ? toWorld(pointer.x, pointer.y) : viewCenter();
+
+  document.addEventListener('copy', e => {
+    if (typing(e.target) || !modal.hidden || getSelection().toString()) return;
+    if (!copySelection()) return;
+    e.preventDefault();
+    e.clipboardData.setData('text/plain', clipStamp = 'dot-items:' + uid());
+  });
+  document.addEventListener('cut', e => {
+    if (typing(e.target) || !modal.hidden || getSelection().toString()) return;
+    if (!copySelection(true)) return;
+    e.preventDefault();
+    e.clipboardData.setData('text/plain', clipStamp = 'dot-items:' + uid());
+    toast(`Cut ${plural(clipboard.length, 'item')} — ⌘V to paste`);
+    removeSelected();
+  });
+  document.addEventListener('paste', e => {
+    if (typing(e.target) || !modal.hidden || !lb.hidden) return;
+    const dt = e.clipboardData;
+    const text = (dt.getData('text/plain') || '').trim();
+    const at = pastePoint();
+    if (clipboard.length && text === clipStamp) { e.preventDefault(); return pasteAt(at); }
+    // Files from outside DOT (e.g. a copied screenshot or image)
+    const files = [...dt.files].filter(f => /^(image|video)\//.test(f.type));
+    if (files.length) {
+      e.preventDefault();
+      files.forEach((f, i) => addItem({ kind: f.type.split('/')[0], blob: f, name: f.name || 'Pasted image' }, { x: at.x + i * (BASE_W + 24), y: at.y }));
+      return;
+    }
+    // A pasted link to an image or video
+    if (isHttpUrl(text)) {
+      const v = parseVideo(text);
+      if (v && (v.provider === 'YouTube' || v.provider === 'Vimeo' || v.provider === 'file')) { e.preventDefault(); return addItem({ kind: 'video', url: text, name: text }, at); }
+      if (/\.(png|jpe?g|gif|webp|avif|svg|bmp)(\?|#|$)/i.test(text)) { e.preventDefault(); return addItem({ kind: 'image', url: text, name: text }, at); }
+    }
+    if (clipboard.length && !text) { e.preventDefault(); pasteAt(at); }
+  });
+
+  /* ---------------- Text editing ---------------- */
+  let endEdit = null;                    // finishes the text edit in progress, if any
+  function startEdit(it, el) {
+    if (endEdit) endEdit();
+    const t = el.querySelector('.txt');
+    try { t.contentEditable = 'plaintext-only'; } catch { t.contentEditable = 'true'; }
+    el.classList.add('editing');
+    t.focus();
+    const range = document.createRange();
+    range.selectNodeContents(t);
+    const s = getSelection(); s.removeAllRanges(); s.addRange(range);
+    const done = () => {
+      if (endEdit !== done) return;
+      endEdit = null;
+      t.removeEventListener('blur', done);
+      if (document.activeElement === t) t.blur();
+      getSelection().removeAllRanges();
+      t.contentEditable = 'false';
+      el.classList.remove('editing');
+      const v = t.innerText.replace(/\s+$/, '').replace(/^\s+/, '');
+      if (!v) { removeItem(it.id); return; }
+      t.textContent = v;
+      if (v !== it.text) { it.text = v; db.put('items', it); }
+      touch(it.id);
+    };
+    endEdit = done;
+    t.addEventListener('blur', done);
+  }
+
+  /* ---------------- Pointer: move, resize, marquee, pan ---------------- */
+  const panning = () => state.tool === 'hand' || state.space;
+
+  world.addEventListener('pointerdown', e => {
+    if (e.target.isContentEditable) { e.stopPropagation(); return; }   // caret placement while editing text
+    const el = e.target.closest('.item');
+    if (!el || e.button !== 0 || panning()) return;                   // hand tool: let the canvas pan
+    e.stopPropagation();
+    closeCtx();
+    endEdit?.();
+    const it = itemById(el.dataset.id);
+    const handle = e.target.closest('.handle');
+    if (handle) return startResize(e, el, it, handle.dataset.corner);
+
+    const was = state.sel.has(it.id);
+    if (e.shiftKey) { if (!was) { state.sel.add(it.id); syncSel(); } }
+    else if (!was) setSelection([it.id]);
+    startMove(e, el, it, was);
+  });
+
+  function startMove(e, el, prim, wasSelected) {
+    let group = [...state.sel].map(itemById).filter(Boolean).map(it => ({ it, el: elOf(it.id), x: it.x, y: it.y }));
+    bringToFront(group.map(g => g.it.id));
+    const s = { x: e.clientX, y: e.clientY, px: prim.x, py: prim.y };
+    let moved = false, cloned = false;
+    el.setPointerCapture(e.pointerId);
+    const move = ev => {
+      if (!moved && Math.hypot(ev.clientX - s.x, ev.clientY - s.y) < 3) return;
+      if (!moved) {
+        moved = true;
+        if (e.altKey) {                                        // Option/Alt-drag: leave originals, drag copies
+          const clones = makeClones(group.map(g => g.it));
+          const byOrig = new Map(group.map((g, i) => [g.it.id, i]));
+          const sorted = [...group].sort((a, b) => (a.it.z || 0) - (b.it.z || 0));
+          group = clones.map((c, i) => ({ it: c, el: elOf(c.id), x: c.x, y: c.y, from: sorted[i].it.id }));
+          prim = group.find(g => g.from === prim.id)?.it || prim;
+          setSelection(group.map(g => g.it.id));
+          renderProjects();
+          cloned = byOrig.size > 0;
+        }
+        group.forEach(g => g.el?.classList.add('dragging'));
+      }
+      let dx = (ev.clientX - s.x) / view.z, dy = (ev.clientY - s.y) / view.z;
+      if (ev.shiftKey) {                                       // Shift = snap to the dots
+        const p = snapWorld(s.px + dx, s.py + dy);
+        dx = p.x - s.px; dy = p.y - s.py;
+      }
+      for (const g of group) {
+        g.it.x = Math.round((g.x + dx) * 100) / 100;
+        g.it.y = Math.round((g.y + dy) * 100) / 100;
+        if (g.el) place(g.el, g.it);
+      }
+    };
+    const up = ev => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      group.forEach(g => g.el?.classList.remove('dragging'));
+      if (moved) { group.forEach(g => db.put('items', g.it)); touch(prim.id); if (cloned) toast(`Duplicated ${plural(group.length, 'item')}`); }
+      else if (ev.shiftKey && wasSelected) { state.sel.delete(prim.id); syncSel(); }
+      else if (!ev.shiftKey && wasSelected && state.sel.size > 1) setSelection([prim.id]);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  }
+
+  function startResize(e, el, it, corner) {
+    const s = { x: e.clientX, y: e.clientY, ix: it.x, iy: it.y, w: it.w, h: boxOf(it).h };
+    const ar = it.kind === 'text' ? null : it.w / it.h;
+    const west = corner.includes('w'), north = corner.includes('n');
+    el.setPointerCapture(e.pointerId);
+    el.classList.add('resizing');
+    const move = ev => {
+      const dx = (ev.clientX - s.x) / view.z, dy = (ev.clientY - s.y) / view.z;
+      let w = s.w + (west ? -dx : dx);
+      if (ar) {                                                // keep the ratio, follow whichever axis moved more
+        const wFromH = (s.h + (north ? -dy : dy)) * ar;
+        if (Math.abs(wFromH - s.w) > Math.abs(w - s.w)) w = wFromH;
+      }
+      if (ev.shiftKey) { const step = GRID / view.z; w = Math.round(w / step) * step; }
+      w = Math.max(MIN_W, Math.round(w));
+      it.w = w;
+      if (ar) it.h = Math.round(w / ar);
+      it.x = west ? s.ix + (s.w - w) : s.ix;
+      it.y = ar && north ? s.iy + (s.h - it.h) : s.iy;
+      place(el, it);
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      el.classList.remove('resizing');
+      db.put('items', it);
+      touch(it.id);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  }
+
+  world.addEventListener('dblclick', e => {
+    const el = e.target.closest('.item');
+    if (!el || e.target.isContentEditable || panning()) return;
+    const it = itemById(el.dataset.id);
+    if (it.kind === 'text') startEdit(it, el);
+    else openLightbox(it);
+  });
+
+  canvas.addEventListener('pointerdown', e => {
+    if (e.target.isContentEditable) return;
+    closeCtx();
+    endEdit?.();
+    if (e.button === 1 || (e.button === 0 && panning())) { e.preventDefault(); return startPan(e); }
+    if (e.button === 0) startMarquee(e);
+  });
+
+  function startPan(e) {
+    let lx = e.clientX, ly = e.clientY;
+    cancelAnimationFrame(anim);
+    canvas.setPointerCapture(e.pointerId);
+    canvas.classList.add('panning');
+    const move = ev => { pan(ev.clientX - lx, ev.clientY - ly); lx = ev.clientX; ly = ev.clientY; };
+    const up = () => {
+      canvas.classList.remove('panning');
+      canvas.removeEventListener('pointermove', move);
+      canvas.removeEventListener('pointerup', up);
+      canvas.removeEventListener('pointercancel', up);
+    };
+    canvas.addEventListener('pointermove', move);
+    canvas.addEventListener('pointerup', up);
+    canvas.addEventListener('pointercancel', up);
+  }
+
+  function startMarquee(e) {
+    const base = e.shiftKey ? new Set(state.sel) : new Set();
+    if (!e.shiftKey) setSelection([]);
+    const r = rect(), sx = e.clientX, sy = e.clientY;
+    const boxes = [...world.querySelectorAll('.item')].map(el => ({ id: el.dataset.id, r: el.getBoundingClientRect() }));
+    let box = null;
+    canvas.setPointerCapture(e.pointerId);
+    const move = ev => {
+      if (!box && Math.hypot(ev.clientX - sx, ev.clientY - sy) < 4) return;
+      if (!box) { box = document.createElement('div'); box.className = 'marquee'; stage.append(box); }
+      const x1 = Math.min(sx, ev.clientX), y1 = Math.min(sy, ev.clientY);
+      const x2 = Math.max(sx, ev.clientX), y2 = Math.max(sy, ev.clientY);
+      Object.assign(box.style, { left: x1 - r.left + 'px', top: y1 - r.top + 'px', width: x2 - x1 + 'px', height: y2 - y1 + 'px' });
+      const sel = new Set(base);
+      for (const b of boxes) if (b.r.left < x2 && b.r.right > x1 && b.r.top < y2 && b.r.bottom > y1) sel.add(b.id);
+      state.sel = sel;
+      syncSel();
+    };
+    const up = () => {
+      box?.remove();
+      canvas.removeEventListener('pointermove', move);
+      canvas.removeEventListener('pointerup', up);
+      canvas.removeEventListener('pointercancel', up);
+    };
+    canvas.addEventListener('pointermove', move);
+    canvas.addEventListener('pointerup', up);
+    canvas.addEventListener('pointercancel', up);
+  }
+
+  // Trackpad: two-finger scroll pans, pinch zooms. Mouse: ⌘/Ctrl + wheel zooms.
+  canvas.addEventListener('wheel', e => {
+    e.preventDefault();
+    closeCtx();
+    cancelAnimationFrame(anim);
+    const r = rect();
+    if (e.ctrlKey || e.metaKey) {
+      const d = e.deltaMode === 1 ? e.deltaY * 16 : e.deltaY;
+      zoomAt(e.clientX - r.left, e.clientY - r.top, Math.exp(-d * 0.01));
+    } else pan(-e.deltaX, -e.deltaY);
+  }, { passive: false });
+
+  /* ---------------- Tools ---------------- */
+  function setTool(t) {
+    state.tool = t;
+    document.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('active', b.dataset.tool === t));
+    canvas.classList.toggle('tool-hand', panning());
+  }
+  document.querySelectorAll('[data-tool]').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+
+  /* ---------------- Context menu ---------------- */
+  const ctx = $('#ctx');
+  function openCtx(x, y, entries) {
+    ctx.innerHTML = '';
+    for (const en of entries) {
+      if (en === 'sep') { ctx.insertAdjacentHTML('beforeend', '<div class="ctx-sep"></div>'); continue; }
+      if (en.heading) { const h = document.createElement('div'); h.className = 'ctx-label'; h.textContent = en.heading; ctx.append(h); continue; }
+      const b = document.createElement('button');
+      b.className = 'ctx-item' + (en.danger ? ' danger' : '');
+      b.innerHTML = `${en.icon || ''}<span></span>${en.hint ? `<kbd class="ctx-hint">${en.hint}</kbd>` : ''}`;
+      b.querySelector('span').textContent = en.label;
+      b.addEventListener('click', () => { closeCtx(); en.action(); });
+      ctx.append(b);
+    }
+    ctx.hidden = false;
+    const w = ctx.offsetWidth, h = ctx.offsetHeight;
+    ctx.style.left = Math.max(8, Math.min(x, innerWidth - w - 8)) + 'px';
+    ctx.style.top = Math.max(8, Math.min(y, innerHeight - h - 8)) + 'px';
+  }
+  function closeCtx() { ctx.hidden = true; }
+  document.addEventListener('pointerdown', e => { if (!ctx.hidden && !ctx.contains(e.target)) closeCtx(); }, true);
+
+  const selectionEntries = () => {
+    const n = state.sel.size;
+    return [
+      { label: 'Duplicate', icon: I.duplicate, hint: '⌘D', action: duplicate },
+      { label: 'Copy', icon: I.copy, hint: '⌘C', action: () => copySelection() },
+      { label: 'Cut', icon: I.cut, hint: '⌘X', action: () => { if (copySelection(true)) { toast(`Cut ${plural(clipboard.length, 'item')} — ⌘V to paste`); removeSelected(); } } },
+      'sep',
+      { label: `New project from ${n > 1 ? plural(n, 'item') : 'selection'}`, icon: I.newProject, action: projectFromSelection },
+      { label: 'Bring to front', icon: I.front, action: () => bringToFront([...state.sel]) },
+      'sep',
+      { label: n > 1 ? `Delete ${plural(n, 'item')}` : 'Delete', icon: I.trash, hint: '⌫', danger: true, action: removeSelected },
+    ];
+  };
+
+  canvas.addEventListener('contextmenu', e => {
+    e.preventDefault();
+    const el = e.target.closest('.item');
+    if (el) {
+      const it = itemById(el.dataset.id);
+      if (!state.sel.has(it.id)) setSelection([it.id]);
+      const first = state.sel.size > 1 ? [{ heading: `${plural(state.sel.size, 'item')} selected` }]
+        : it.kind === 'text' ? [{ label: 'Edit text', icon: I.edit, action: () => startEdit(it, el) }]
+        : [{ label: 'Open', icon: I.open, action: () => openLightbox(it) }];
+      openCtx(e.clientX, e.clientY, [...first, ...selectionEntries()]);
+      return;
+    }
+    const at = toWorld(e.clientX, e.clientY);
+    const sel = state.sel.size ? [{ heading: `${plural(state.sel.size, 'item')} selected` }, ...selectionEntries(), 'sep'] : [];
+    const paste = clipboard.length ? [{ label: `Paste ${plural(clipboard.length, 'item')} here`, icon: I.paste, hint: '⌘V', action: () => pasteAt(at) }, 'sep'] : [];
+    openCtx(e.clientX, e.clientY, [
+      ...paste,
+      ...sel,
+      { heading: 'Add media' },
+      { label: 'Add Image', icon: I.image, action: () => openAddModal('image', 'file', at) },
+      { label: 'Add Video', icon: I.video, action: () => openAddModal('video', 'file', at) },
+      { label: 'Add Image Link', icon: I.link, action: () => openAddModal('image', 'link', at) },
+      { label: 'Add Video Link', icon: I.link, action: () => openAddModal('video', 'link', at) },
+      'sep',
+      { heading: 'Add text' },
+      ...Object.entries(TEXT).map(([variant, t]) => ({
+        label: t.label, icon: I[variant],
+        action: async () => { const { it, el } = await addItem({ kind: 'text', variant, text: '' }, at); startEdit(it, el); },
+      })),
+    ]);
+  });
+
+  /* ---------------- Confirm dialog (window.confirm is blocked when hosted) ---------------- */
+  function confirmDialog({ title, body, ok = 'Delete' }) {
+    return new Promise(res => {
+      modal.innerHTML = `<div class="modal" role="alertdialog" aria-modal="true"><h2></h2><p class="sub"></p>
+        <div class="actions"><button type="button" class="btn ghost" data-no>Cancel</button><button type="button" class="btn primary danger" data-yes></button></div></div>`;
+      modal.querySelector('h2').textContent = title;
+      modal.querySelector('.sub').textContent = body;
+      const yes = modal.querySelector('[data-yes]');
+      yes.textContent = ok;
+      modal.hidden = false;
+      const done = v => { closeModal(); res(v); };
+      modal.querySelector('[data-no]').onclick = () => done(false);
+      yes.onclick = () => done(true);
+      yes.focus();
+    });
+  }
+
+  /* ---------------- Add modal ---------------- */
+  const modal = $('#modal');
+  function closeModal() { modal.hidden = true; modal.innerHTML = ''; }
+  modal.addEventListener('pointerdown', e => { if (e.target === modal) closeModal(); });
+
+  function openAddModal(kind, source, at) {
+    const Noun = kind === 'image' ? 'Image' : 'Video';
+    const title = source === 'file' ? `Add ${Noun}` : `Add ${Noun} Link`;
+    const sub = source === 'file'
+      ? (kind === 'image' ? 'Upload an image (PNG, JPG, GIF, WebP…) from your computer.' : 'Upload a video (MP4, WebM, MOV…) from your computer.')
+      : (kind === 'image' ? 'Paste a direct link to an image.' : 'Paste a YouTube, Vimeo, or direct video file link.');
+
+    modal.innerHTML = `
+      <form class="modal" autocomplete="off">
+        <h2></h2><p class="sub"></p>
+        ${source === 'file'
+          ? `<label class="drop">${I.upload}<span><strong>Click to choose</strong> or drag a file here</span><input type="file" accept="${kind}/*"></label>`
+          : `<input class="field" type="url" placeholder="https://…" required>`}
+        <div class="preview" hidden><div class="thumb"></div><div class="meta"><b></b><span></span></div></div>
+        <div class="err"></div>
+        <div class="actions">
+          <button type="button" class="btn ghost" data-cancel>Cancel</button>
+          <button type="submit" class="btn primary" disabled>Add to canvas</button>
+        </div>
+      </form>`;
+    modal.querySelector('h2').textContent = title;
+    modal.querySelector('.sub').textContent = sub;
+    modal.hidden = false;
+
+    const form = modal.querySelector('form');
+    const submit = form.querySelector('[type=submit]');
+    const preview = form.querySelector('.preview');
+    const thumb = preview.querySelector('.thumb');
+    const err = form.querySelector('.err');
+    form.querySelector('[data-cancel]').onclick = closeModal;
+    let payload = null;
+
+    const showPreview = (node, name, meta) => {
+      thumb.innerHTML = ''; if (node) thumb.append(node);
+      preview.querySelector('b').textContent = name;
+      preview.querySelector('span').textContent = meta;
+      preview.hidden = false;
+    };
+
+    if (source === 'file') {
+      const drop = form.querySelector('.drop');
+      const input = drop.querySelector('input');
+      const take = file => {
+        err.textContent = '';
+        if (!file || !file.type.startsWith(kind + '/')) { err.textContent = `That doesn't look like a${kind === 'image' ? 'n image' : ' video'} file.`; submit.disabled = true; return; }
+        payload = { kind, blob: file, name: file.name };
+        const u = URL.createObjectURL(file);
+        const node = kind === 'image' ? Object.assign(new Image(), { src: u }) : Object.assign(document.createElement('video'), { src: u + '#t=0.1', muted: true, preload: 'metadata' });
+        showPreview(node, file.name, `${(file.size / 1024 / 1024).toFixed(2)} MB`);
+        submit.disabled = false;
+      };
+      input.addEventListener('change', () => take(input.files[0]));
+      drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('over'); });
+      drop.addEventListener('dragleave', () => drop.classList.remove('over'));
+      drop.addEventListener('drop', e => { e.preventDefault(); drop.classList.remove('over'); take(e.dataTransfer.files[0]); });
+    } else {
+      const input = form.querySelector('.field');
+      setTimeout(() => input.focus(), 30);
+      let seq = 0;
+      input.addEventListener('input', () => {
+        const url = input.value.trim();
+        const my = ++seq;
+        err.textContent = ''; preview.hidden = true; payload = null; submit.disabled = true;
+        if (!isHttpUrl(url)) { if (url) err.textContent = 'Enter a full link starting with https://'; return; }
+        payload = { kind, url, name: url };
+        submit.disabled = false;
+        if (kind === 'image') {
+          const img = new Image();
+          img.onload = () => { if (my === seq) showPreview(img, hostOf(url), `${img.naturalWidth} × ${img.naturalHeight}`); };
+          img.onerror = () => { if (my === seq) err.textContent = "Couldn't load a preview — you can still add it."; };
+          img.src = url;
+        } else {
+          const v = parseVideo(url);
+          const node = v.thumb ? Object.assign(new Image(), { src: v.thumb }) : null;
+          showPreview(node, v.provider === 'file' ? 'Video file' : v.provider, hostOf(url));
+        }
+      });
+    }
+
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      if (!payload) return;
+      addItem(payload, at);
+      closeModal();
+    });
+  }
+
+  /* ---------------- Drop files directly on canvas ---------------- */
+  canvas.addEventListener('dragover', e => {
+    if (![...e.dataTransfer.types].includes('Files')) return;
+    e.preventDefault(); canvas.classList.add('drop-hover');
+  });
+  canvas.addEventListener('dragleave', () => canvas.classList.remove('drop-hover'));
+  canvas.addEventListener('drop', e => {
+    e.preventDefault(); canvas.classList.remove('drop-hover');
+    const at = toWorld(e.clientX, e.clientY);
+    [...e.dataTransfer.files]
+      .filter(f => /^(image|video)\//.test(f.type))
+      .forEach((f, i) => addItem({ kind: f.type.split('/')[0], blob: f, name: f.name }, { x: at.x + i * (BASE_W + 24), y: at.y }));
+  });
+
+  /* ---------------- Lightbox ---------------- */
+  const lb = $('#lightbox');
+  function closeLightbox() { lb.hidden = true; lb.innerHTML = ''; }
+  lb.addEventListener('click', e => { if (e.target === lb || e.target.closest('.lb-close')) closeLightbox(); });
+  function openLightbox(it) {
+    if (!it || it.kind === 'text') return;
+    lb.innerHTML = '<button class="lb-close" title="Close">×</button>';
+    let node;
+    if (it.kind === 'image') {
+      node = Object.assign(new Image(), { src: srcOf(it), className: 'lb-media' });
+    } else {
+      const v = it.blob ? { provider: 'file' } : parseVideo(it.url) || {};
+      if (v.provider === 'file') {
+        node = Object.assign(document.createElement('video'), { src: srcOf(it), controls: true, autoplay: true, className: 'lb-media' });
+      } else if (v.embed && !EMBEDDED) {
+        node = Object.assign(document.createElement('iframe'), { src: v.embed, className: 'lb-media', allow: 'autoplay; fullscreen; picture-in-picture', allowFullscreen: true });
+      } else {
+        node = document.createElement('div');
+        node.className = 'lb-link';
+        node.append(Object.assign(document.createElement('a'), { href: it.url, target: '_blank', rel: 'noopener noreferrer',
+          textContent: v.provider && v.provider.length < 12 ? `Watch on ${v.provider} ↗` : 'Open video in a new tab ↗' }));
+      }
+    }
+    lb.append(node);
+    lb.hidden = false;
+  }
+
+  /* ---------------- Toast ---------------- */
+  let toastTimer;
+  function toast(msg, act) {
+    const t = $('#toast');
+    t.innerHTML = '<span></span>';
+    t.firstChild.textContent = msg;
+    if (act) {
+      const b = Object.assign(document.createElement('button'), { textContent: act.label });
+      b.onclick = () => { t.hidden = true; act.action(); };
+      t.append(b);
+    }
+    t.hidden = false;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => { t.hidden = true; }, 5000);
+  }
+
+  /* ---------------- Controls & keyboard ---------------- */
+  $('#zoomIn').onclick = () => zoomCenter(1.25);
+  $('#zoomOut').onclick = () => zoomCenter(0.8);
+  $('#zoomReset').onclick = () => zoomCenter(1 / view.z);
+  $('#zoomFit').onclick = () => fitAll();
+  $('#locate').onclick = goToLastEdited;
+  $('#addProject').onclick = () => addProject();
+
+  const typing = t => t.closest?.('input, textarea') || t.isContentEditable;
+  document.addEventListener('keydown', e => {
+    if (typing(e.target)) return;
+    if (e.key === 'Escape') { closeCtx(); closeModal(); closeLightbox(); setSelection([]); return; }
+    if (!modal.hidden || !lb.hidden) return;
+    if (e.key === 'Alt') canvas.classList.add('alt');
+    if (e.code === 'Space') { e.preventDefault(); if (!state.space) { state.space = true; canvas.classList.add('tool-hand'); } return; }
+    if (e.metaKey || e.ctrlKey) {
+      if (e.key === 'a') { e.preventDefault(); setSelection(itemsHere().map(i => i.id)); }
+      if (e.key === 'd') { e.preventDefault(); duplicate(); }
+      return;
+    }
+    if ((e.key === 'Delete' || e.key === 'Backspace') && state.sel.size) { e.preventDefault(); removeSelected(); }
+    else if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomCenter(1.25); }
+    else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomCenter(0.8); }
+    else if (e.shiftKey && e.code === 'Digit0') zoomCenter(1 / view.z);
+    else if (e.shiftKey && e.code === 'Digit1') fitAll();
+    else if (e.key === 'v' || e.key === 'V') setTool('select');
+    else if (e.key === 'h' || e.key === 'H') setTool('hand');
+    else if (e.key === 'l' || e.key === 'L') goToLastEdited();
+  });
+  addEventListener('blur', () => canvas.classList.remove('alt'));
+  document.addEventListener('keyup', e => {
+    if (e.code === 'Space') { state.space = false; canvas.classList.toggle('tool-hand', panning()); }
+    if (e.key === 'Alt') canvas.classList.remove('alt');
+  });
+
+  /* ---------------- Welcome project (first visit only) ---------------- */
+  const exampleArt = (c1, c2, shape) => new Blob([`<svg xmlns="http://www.w3.org/2000/svg" width="800" height="1000" viewBox="0 0 800 1000">
+    <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="${c1}"/><stop offset="1" stop-color="${c2}"/></linearGradient></defs>
+    <rect width="800" height="1000" fill="url(#g)"/>${shape}
+    <text x="48" y="950" font-family="-apple-system, Helvetica, Arial, sans-serif" font-size="30" font-weight="600" fill="#fff" fill-opacity=".85" letter-spacing="2">EXAMPLE</text></svg>`],
+    { type: 'image/svg+xml' });
+
+  async function seedWelcome() {
+    const p = await addProject('Welcome to DOT', false);
+    const base = { projectId: p.id, blob: null, url: null };
+    const items = [
+      { kind: 'text', variant: 'heading', text: 'Welcome to DOT', x: -460, y: -300 },
+      { kind: 'text', variant: 'subheading', text: 'An infinite canvas for every project', x: -460, y: -232 },
+      { kind: 'text', variant: 'paragraph', x: -460, y: -176,
+        text: 'Right-click anywhere to add images, videos or text.\nDrag on empty space to select. Hold Space and drag to pan, ⌘ + scroll or pinch to zoom.\nShift-drag snaps to the dots. Option-drag duplicates. Drag a corner to resize.' },
+      { kind: 'image', name: 'Example image', w: 240, ar: 4 / 5, x: 20, y: -300,
+        blob: exampleArt('#f3a46b', '#d9534f', '<circle cx="400" cy="420" r="190" fill="#fff" fill-opacity=".9"/>') },
+      { kind: 'image', name: 'Example image', w: 240, ar: 4 / 5, x: 284, y: -228,
+        blob: exampleArt('#8fb8de', '#2f4a7a', '<rect x="210" y="230" width="380" height="380" rx="40" fill="#fff" fill-opacity=".9" transform="rotate(12 400 420)"/>') },
+    ];
+    for (const [i, d] of items.entries()) {
+      const it = normalize({ ...base, id: uid(), createdAt: Date.now() + i, z: i + 1, name: '', ...d });
+      state.items.push(it);
+      await db.put('items', it);
+    }
+    p.lastEdited = state.items.find(i => i.projectId === p.id && i.variant === 'heading')?.id || null;
+    await db.put('projects', p);
+    openProject(p.id);
+  }
+
+  /* ---------------- Boot ---------------- */
+  (async () => {
+    [state.projects, state.items] = await Promise.all([db.all('projects'), db.all('items')]);
+    state.items.forEach(normalize);
+    state.projects.sort((a, b) => a.createdAt - b.createdAt);
+    setTool('select');
+    if (!state.projects.length) return seedWelcome();
+    let last = null;
+    try { last = localStorage.getItem('dot.current'); } catch {}
+    openProject(state.projects.some(p => p.id === last) ? last : state.projects[0].id);
+  })();
+})();

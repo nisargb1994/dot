@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DOT</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="shell">
+    <!-- Rail -->
+    <nav class="rail">
+      <div class="logo" title="DOT">
+        <span class="logo-mark"></span>
+        <span class="logo-text">DOT</span>
+      </div>
+      <div class="rail-icons">
+        <button class="rail-btn" title="Home" data-icon="home"></button>
+        <button class="rail-btn active" title="Canvas" data-icon="target"></button>
+        <button class="rail-btn" title="Library" data-icon="library"></button>
+        <button class="rail-btn" title="Settings" data-icon="settings"></button>
+      </div>
+    </nav>
+
+    <!-- Projects panel -->
+    <aside class="panel">
+      <h1 class="panel-title">Projects</h1>
+      <div class="panel-section-label">Your projects</div>
+      <div class="project-list" id="projectList"></div>
+      <button class="add-row" id="addProject"><span class="add-plus">+</span> Add Project</button>
+
+      <div class="divider"></div>
+      <div class="panel-section-label">On this canvas</div>
+      <div class="stat-row"><span class="stat-icon" data-icon="image"></span><span>Images</span><span class="count" id="statImages">0</span></div>
+      <div class="stat-row"><span class="stat-icon" data-icon="video"></span><span>Videos</span><span class="count" id="statVideos">0</span></div>
+      <div class="stat-row"><span class="stat-icon" data-icon="text"></span><span>Text</span><span class="count" id="statText">0</span></div>
+    </aside>
+
+    <!-- Canvas -->
+    <main class="stage" id="stage">
+      <div class="canvas" id="canvas">
+        <div class="world" id="world"></div>
+      </div>
+
+      <div class="toolbar">
+        <button class="tb" data-tool="select" data-icon="select" title="Select (V)"></button>
+        <button class="tb" data-tool="hand" data-icon="hand" title="Hand — pan (H, or hold Space)"></button>
+      </div>
+
+      <div class="topbar">
+        <div class="crumb"><span class="crumb-name" id="crumbName">—</span><span class="crumb-count" id="crumbCount"></span></div>
+      </div>
+
+      <div class="empty" id="empty">
+        <div class="empty-dot"></div>
+        <div class="empty-title">This canvas is empty</div>
+        <div class="empty-sub">Right-click anywhere to add images, videos or text,<br/>or drop files straight onto the grid.</div>
+      </div>
+
+      <div class="zoombar">
+        <button class="zb" id="locate" title="Back to last edited (L)" data-icon="locate"></button>
+        <span class="zb-sep"></span>
+        <button class="zb" id="zoomOut" title="Zoom out (−)">−</button>
+        <button class="zb zb-label" id="zoomReset" title="Reset to 100% (Shift+0)">100%</button>
+        <button class="zb" id="zoomIn" title="Zoom in (+)">+</button>
+        <span class="zb-sep"></span>
+        <button class="zb" id="zoomFit" title="Fit all (Shift+1)" data-icon="fit"></button>
+      </div>
+
+      <div class="help">Drag to select · Space-drag to pan · Shift-drag to snap · ⌘ + scroll to zoom</div>
+    </main>
+  </div>
+
+  <div class="ctx" id="ctx" hidden></div>
+  <div class="modal-backdrop" id="modal" hidden></div>
+  <div class="lightbox" id="lightbox" hidden></div>
+  <div class="toast" id="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
