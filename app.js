@@ -47,6 +47,13 @@
     copy: svg('<rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6A2.5 2.5 0 0 0 13 3.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5"/>'),
     paste: svg('<path d="M9 4.5H6.5A2 2 0 0 0 4.5 6.5v12a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-12a2 2 0 0 0-2-2H15"/><rect x="9" y="3" width="6" height="3.5" rx="1"/>'),
     cut: svg('<circle cx="6.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/><path d="M8.5 16 18 4M15.5 16 6 4"/>'),
+    rotate: svg('<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4.5V11h-6.5"/>'),
+    resetRot: svg('<path d="M4 13a8 8 0 1 0 2.3-5.7"/><path d="M4 4.5V11h6.5"/>'),
+    chevron: svg('<path d="m9 6 6 6-6 6"/>', 2),
+    folder: svg('<path d="M3.5 7A2 2 0 0 1 5.5 5h4l2 2.2h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>'),
+    newFolder: svg('<path d="M3.5 7A2 2 0 0 1 5.5 5h4l2 2.2h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 10.5v5M9.5 13h5"/>'),
+    out: svg('<path d="M14 5h4.5A1.5 1.5 0 0 1 20 6.5v11a1.5 1.5 0 0 1-1.5 1.5H14M10 16l-4-4 4-4M6 12h10"/>'),
+    sidebar: svg('<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/>'),
     newProject: svg('<path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>'),
   };
   document.querySelectorAll('[data-icon]').forEach(el => { el.innerHTML = I[el.dataset.icon] || ''; });
@@ -54,14 +61,16 @@
   /* ---------------- IndexedDB ---------------- */
   const db = (() => {
     let dbp;
-    const mem = { projects: new Map(), items: new Map() };
+    const mem = { projects: new Map(), items: new Map(), folders: new Map() };
     const open = () => dbp || (dbp = new Promise((res, rej) => {
       let req;
-      try { req = indexedDB.open('dot-app', 1); } catch (e) { return rej(e); }
+      try { req = indexedDB.open('dot-app', 2); } catch (e) { return rej(e); }
       req.onupgradeneeded = () => {
         const d = req.result;
-        d.createObjectStore('projects', { keyPath: 'id' });
-        d.createObjectStore('items', { keyPath: 'id' }).createIndex('projectId', 'projectId');
+        const has = n => d.objectStoreNames.contains(n);
+        if (!has('projects')) d.createObjectStore('projects', { keyPath: 'id' });
+        if (!has('items')) d.createObjectStore('items', { keyPath: 'id' }).createIndex('projectId', 'projectId');
+        if (!has('folders')) d.createObjectStore('folders', { keyPath: 'id' });
       };
       req.onsuccess = () => res(req.result);
       req.onerror = () => rej(req.error);
@@ -89,7 +98,7 @@
   })();
 
   /* ---------------- State ---------------- */
-  const state = { projects: [], items: [], current: null, sel: new Set(), topZ: 1, tool: 'select', space: false };
+  const state = { projects: [], items: [], folders: [], current: null, sel: new Set(), topZ: 1, tool: 'select', space: false };
   let view = { x: 0, y: 0, z: 1 };
   const bg = { x: 0, y: 0 };             // dot-grid offset: follows panning, ignores zooming
   const urls = new Map();
@@ -223,54 +232,149 @@
     if (el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
   }
 
-  /* ---------------- Projects panel ---------------- */
+  /* ---------------- Sidebar: folders + projects ---------------- */
+  const DRAG_TYPE = 'application/x-dot-project';
+  const itemCount = pid => state.items.reduce((n, i) => n + (i.projectId === pid ? 1 : 0), 0);
+  const folderOf = p => (p && p.folderId && state.folders.find(f => f.id === p.folderId)) || null;
+  const sectionLabel = text => Object.assign(document.createElement('div'), { className: 'panel-section-label', textContent: text });
+
+  // Projects can be dragged onto a folder (or back to the loose list).
+  function dropZone(el, folderId) {
+    el.addEventListener('dragover', e => {
+      if (!e.dataTransfer.types.includes(DRAG_TYPE)) return;
+      e.preventDefault(); e.stopPropagation();
+      e.dataTransfer.dropEffect = 'move';
+      el.classList.add('drop-target');
+    });
+    el.addEventListener('dragleave', e => { if (!el.contains(e.relatedTarget)) el.classList.remove('drop-target'); });
+    el.addEventListener('drop', e => {
+      if (!e.dataTransfer.types.includes(DRAG_TYPE)) return;
+      e.preventDefault(); e.stopPropagation();
+      el.classList.remove('drop-target');
+      moveProject(e.dataTransfer.getData(DRAG_TYPE), folderId);
+    });
+  }
+
+  function projectRow(p) {
+    const row = document.createElement('div');
+    row.className = 'row project' + (p.id === state.current ? ' active' : '');
+    Object.assign(row.dataset, { kind: 'project', id: p.id });
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    row.draggable = true;
+    row.innerHTML = `<span class="p-icon">${I.grid}</span><span class="p-name"></span><span class="count">${itemCount(p.id)}</span>`;
+    row.querySelector('.p-name').textContent = p.name;
+    row.addEventListener('click', () => { if (p.id !== state.current) openProject(p.id); });
+    row.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target === row) openProject(p.id); });
+    row.addEventListener('dblclick', () => startRename('project', p.id));
+    row.addEventListener('dragstart', e => {
+      e.dataTransfer.setData(DRAG_TYPE, p.id);
+      e.dataTransfer.effectAllowed = 'move';
+      row.classList.add('drag-src');
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('drag-src');
+      document.querySelectorAll('.drop-target').forEach(x => x.classList.remove('drop-target'));
+    });
+    row.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      const targets = state.folders.filter(f => f.id !== p.folderId);
+      openCtx(e.clientX, e.clientY, [
+        { label: 'Rename', icon: I.edit, action: () => startRename('project', p.id) },
+        'sep',
+        ...(targets.length ? [{ heading: 'Move to folder' }, ...targets.map(f => ({ label: f.name, icon: I.folder, action: () => moveProject(p.id, f.id) }))] : []),
+        { label: 'New folder with this project', icon: I.newFolder, action: () => addFolder(p.id) },
+        ...(p.folderId ? [{ label: 'Take out of folder', icon: I.out, action: () => moveProject(p.id, null) }] : []),
+        'sep',
+        { label: 'Delete project', icon: I.trash, danger: true, action: () => deleteProject(p.id) },
+      ]);
+    });
+    return row;
+  }
+
+  function folderGroup(f) {
+    const projs = state.projects.filter(p => p.folderId === f.id);
+    const group = document.createElement('div');
+    group.className = 'folder-group' + (f.open ? ' open' : '');
+    const row = document.createElement('div');
+    row.className = 'row folder' + (projs.some(p => p.id === state.current) ? ' has-active' : '');
+    Object.assign(row.dataset, { kind: 'folder', id: f.id });
+    row.tabIndex = 0;
+    row.setAttribute('role', 'button');
+    row.setAttribute('aria-expanded', String(!!f.open));
+    row.innerHTML = `<span class="chev">${I.chevron}</span><span class="p-icon">${I.folder}</span><span class="p-name"></span><span class="count">${projs.length}</span>`;
+    row.querySelector('.p-name').textContent = f.name;
+    const toggle = () => {
+      f.open = !f.open;
+      group.classList.toggle('open', f.open);
+      row.setAttribute('aria-expanded', String(f.open));
+      db.put('folders', f);
+    };
+    row.addEventListener('click', e => { if (!e.target.closest('input')) toggle(); });
+    row.addEventListener('keydown', e => { if (e.key === 'Enter' && e.target === row) toggle(); });
+    row.addEventListener('dblclick', e => { e.preventDefault(); startRename('folder', f.id); });
+    row.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      openCtx(e.clientX, e.clientY, [
+        { label: 'New project in folder', icon: I.newProject, action: () => addProject('Untitled Project', true, f.id) },
+        { label: 'Rename', icon: I.edit, action: () => startRename('folder', f.id) },
+        'sep',
+        { label: 'Delete folder', icon: I.trash, danger: true, action: () => deleteFolder(f.id) },
+      ]);
+    });
+    const kids = document.createElement('div');
+    kids.className = 'folder-children';
+    projs.forEach(p => kids.append(projectRow(p)));
+    if (!projs.length) kids.append(Object.assign(document.createElement('div'), { className: 'folder-empty', textContent: 'Drag projects here' }));
+    group.append(row, kids);
+    dropZone(group, f.id);
+    return group;
+  }
+
   function renderProjects() {
     const list = $('#projectList');
     list.innerHTML = '';
-    for (const p of state.projects) {
-      const n = state.items.filter(i => i.projectId === p.id).length;
-      const row = document.createElement('button');
-      row.className = 'project' + (p.id === state.current ? ' active' : '');
-      row.dataset.id = p.id;
-      row.innerHTML = `<span class="p-icon">${I.grid}</span><span class="p-name"></span><span class="count">${n}</span>`;
-      row.querySelector('.p-name').textContent = p.name;
-      row.addEventListener('click', () => { if (p.id !== state.current) openProject(p.id); });
-      row.addEventListener('dblclick', () => startRename(p.id));
-      row.addEventListener('contextmenu', e => {
-        e.preventDefault();
-        openCtx(e.clientX, e.clientY, [
-          { label: 'Rename', icon: I.edit, action: () => startRename(p.id) },
-          'sep',
-          { label: 'Delete project', icon: I.trash, danger: true, action: () => deleteProject(p.id) },
-        ]);
-      });
-      list.append(row);
+    if (state.folders.length) {
+      list.append(sectionLabel('Folders'));
+      state.folders.forEach(f => list.append(folderGroup(f)));
+      list.append(sectionLabel('Projects'));
     }
-    const p = project();
+    const loose = document.createElement('div');
+    loose.className = 'loose';
+    state.projects.filter(p => !folderOf(p)).forEach(p => loose.append(projectRow(p)));
+    if (state.folders.length && !loose.children.length)
+      loose.append(Object.assign(document.createElement('div'), { className: 'folder-empty', textContent: 'Drag a project here to take it out of its folder' }));
+    dropZone(loose, null);
+    list.append(loose);
+
+    const p = project(), f = folderOf(p);
+    $('#crumbFolder').textContent = f ? f.name : '';
+    $('#crumbFolder').hidden = !f;
     $('#crumbName').textContent = p ? p.name : '—';
     const here = itemsHere();
     $('#crumbCount').textContent = here.length ? plural(here.length, 'item') : '';
-    $('#statImages').textContent = here.filter(i => i.kind === 'image').length;
-    $('#statVideos').textContent = here.filter(i => i.kind === 'video').length;
-    $('#statText').textContent = here.filter(i => i.kind === 'text').length;
     $('#empty').hidden = here.length > 0;
     $('#locate').classList.toggle('disabled', !here.length);
   }
 
-  function startRename(id) {
-    const row = $(`.project[data-id="${id}"]`);
-    const p = state.projects.find(x => x.id === id);
-    if (!row || !p) return;
+  function startRename(kind, id) {
+    const coll = kind === 'folder' ? state.folders : state.projects;
+    const store = kind === 'folder' ? 'folders' : 'projects';
+    const row = $(`.row[data-kind="${kind}"][data-id="${id}"]`);
+    const obj = coll.find(x => x.id === id);
+    if (!row || !obj) return;
+    row.draggable = false;
     const nameEl = row.querySelector('.p-name');
     const input = document.createElement('input');
-    input.value = p.name;
+    input.value = obj.name;
+    input.setAttribute('aria-label', `Rename ${kind}`);
     nameEl.replaceWith(input);
     input.focus(); input.select();
     let done = false;
     const commit = save => {
       if (done) return; done = true;
       const v = input.value.trim();
-      if (save && v) { p.name = v; db.put('projects', p); }
+      if (save && v) { obj.name = v; db.put(store, obj); }
       renderProjects();
     };
     input.addEventListener('keydown', e => {
@@ -280,20 +384,57 @@
     });
     input.addEventListener('blur', () => commit(true));
     input.addEventListener('click', e => e.stopPropagation());
+    input.addEventListener('dblclick', e => e.stopPropagation());
   }
 
-  async function addProject(name = 'Untitled Project', rename = true) {
-    const p = { id: uid(), name, createdAt: Date.now(), view: null, lastEdited: null };
+  async function addProject(name = 'Untitled Project', rename = true, folderId = null) {
+    const p = { id: uid(), name, createdAt: Date.now(), view: null, lastEdited: null, folderId };
     state.projects.push(p);
     await db.put('projects', p);
+    const f = folderOf(p);
+    if (f && !f.open) { f.open = true; db.put('folders', f); }
     openProject(p.id);
-    if (rename) startRename(p.id);
+    if (rename) startRename('project', p.id);
     return p;
+  }
+
+  async function addFolder(withProjectId) {
+    const f = { id: uid(), name: 'New Folder', createdAt: Date.now(), open: true };
+    state.folders.push(f);
+    await db.put('folders', f);
+    if (withProjectId) await moveProject(withProjectId, f.id, false);
+    renderProjects();
+    startRename('folder', f.id);
+  }
+
+  async function moveProject(pid, folderId, render = true) {
+    const p = state.projects.find(x => x.id === pid);
+    if (!p || (p.folderId || null) === folderId) return;
+    p.folderId = folderId;
+    await db.put('projects', p);
+    const f = folderOf(p);
+    if (f && !f.open) { f.open = true; db.put('folders', f); }
+    if (render) renderProjects();
+  }
+
+  async function deleteFolder(id) {
+    const f = state.folders.find(x => x.id === id);
+    const projs = state.projects.filter(p => p.folderId === id);
+    const ok = await confirmDialog({
+      title: `Delete folder “${f.name}”?`,
+      body: projs.length ? `Its ${plural(projs.length, 'project')} will stay in your list, outside any folder.` : 'This folder is empty.',
+      ok: 'Delete folder',
+    });
+    if (!ok) return;
+    for (const p of projs) { p.folderId = null; await db.put('projects', p); }
+    state.folders = state.folders.filter(x => x.id !== id);
+    await db.del('folders', id);
+    renderProjects();
   }
 
   async function deleteProject(id) {
     const p = state.projects.find(x => x.id === id);
-    const n = state.items.filter(i => i.projectId === id).length;
+    const n = itemCount(id);
     const ok = await confirmDialog({
       title: `Delete “${p.name}”?`,
       body: `${n ? `Its ${plural(n, 'item')} will be removed too. ` : ''}This can't be undone.`,
@@ -320,11 +461,32 @@
     else resetView();
   }
 
+  /* ---------------- Collapsible sidebar ---------------- */
+  const shell = $('.shell');
+  function setCollapsed(v, animate = true) {
+    if (shell.classList.contains('collapsed') === v) return;
+    try { localStorage.setItem('dot.collapsed', v ? '1' : '0'); } catch {}
+    let last = rect().left;
+    if (!animate) shell.classList.add('no-anim');
+    shell.classList.toggle('collapsed', v);
+    $('#collapsePanel').setAttribute('aria-expanded', String(!v));
+    if (!animate) { void shell.offsetWidth; shell.classList.remove('no-anim'); return; }
+    // Keep the canvas content still on screen while the sidebar slides.
+    const t0 = performance.now();
+    const tick = () => {
+      const l = rect().left;
+      if (l !== last) { pan(last - l, 0); last = l; }
+      if (performance.now() - t0 < 450) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
+  const togglePanel = () => setCollapsed(!shell.classList.contains('collapsed'));
+
   async function projectFromSelection() {
     const src = [...state.sel].map(itemById).filter(Boolean);
     if (!src.length) return;
     const cur = project();
-    const p = { id: uid(), name: `${cur.name} — selection`, createdAt: Date.now(), view: null, lastEdited: null };
+    const p = { id: uid(), name: `${cur.name} — selection`, createdAt: Date.now(), view: null, lastEdited: null, folderId: folderOf(cur) ? cur.folderId : null };
     state.projects.push(p);
     await db.put('projects', p);
     for (const it of src.sort((a, b) => (a.z || 0) - (b.z || 0))) {
@@ -351,7 +513,9 @@
     el.style.width = it.w + 'px';
     if (it.kind !== 'text') el.style.height = it.h + 'px';
     el.style.zIndex = it.z || 0;
+    el.style.transform = it.rot ? `rotate(${it.rot}deg)` : '';
   }
+  const normDeg = d => { d = ((d % 360) + 540) % 360 - 180; return d === -180 ? 180 : Math.round(d * 10) / 10; };
 
   // Lock the card to the media's real aspect ratio (width stays, height follows).
   function setRatio(it, el, ar) {
@@ -437,6 +601,10 @@
       h.dataset.corner = c;
       el.append(h);
     }
+    const rh = document.createElement('div');
+    rh.className = 'rot-handle';
+    rh.title = 'Drag to rotate · Shift for 15° steps';
+    el.append(rh);
     place(el, it);
     return el;
   }
@@ -614,6 +782,7 @@
     closeCtx();
     endEdit?.();
     const it = itemById(el.dataset.id);
+    if (e.target.closest('.rot-handle')) return startRotate(e, el, it);
     const handle = e.target.closest('.handle');
     if (handle) return startResize(e, el, it, handle.dataset.corner);
 
@@ -670,25 +839,37 @@
     el.addEventListener('pointercancel', up);
   }
 
+  // Text boxes carry 4px vertical padding each side; their content height is what x/y/w describe.
+  const contentH = (it, el) => it.kind === 'text' ? el.offsetHeight - 8 : it.h;
+
   function startResize(e, el, it, corner) {
-    const s = { x: e.clientX, y: e.clientY, ix: it.x, iy: it.y, w: it.w, h: boxOf(it).h };
+    const s = { x: e.clientX, y: e.clientY, w: it.w, h: contentH(it, el) };
     const ar = it.kind === 'text' ? null : it.w / it.h;
-    const west = corner.includes('w'), north = corner.includes('n');
+    const sx = corner.includes('w') ? -1 : 1, sy = corner.includes('n') ? -1 : 1;
+    const th = (it.rot || 0) * Math.PI / 180, cos = Math.cos(th), sin = Math.sin(th);
+    const R = (x, y) => ({ x: x * cos - y * sin, y: x * sin + y * cos });
+    const c0 = { x: it.x + s.w / 2, y: it.y + s.h / 2 };
+    const a = R(-sx * s.w / 2, -sy * s.h / 2);
+    const anchor = { x: c0.x + a.x, y: c0.y + a.y };       // opposite corner, pinned in world space
     el.setPointerCapture(e.pointerId);
     el.classList.add('resizing');
     const move = ev => {
-      const dx = (ev.clientX - s.x) / view.z, dy = (ev.clientY - s.y) / view.z;
-      let w = s.w + (west ? -dx : dx);
+      const dX = (ev.clientX - s.x) / view.z, dY = (ev.clientY - s.y) / view.z;
+      const lx = dX * cos + dY * sin, ly = -dX * sin + dY * cos;   // pointer delta in the item's own axes
+      let w = s.w + sx * lx;
       if (ar) {                                                // keep the ratio, follow whichever axis moved more
-        const wFromH = (s.h + (north ? -dy : dy)) * ar;
+        const wFromH = (s.h + sy * ly) * ar;
         if (Math.abs(wFromH - s.w) > Math.abs(w - s.w)) w = wFromH;
       }
       if (ev.shiftKey) { const step = GRID / view.z; w = Math.round(w / step) * step; }
       w = Math.max(MIN_W, Math.round(w));
       it.w = w;
-      if (ar) it.h = Math.round(w / ar);
-      it.x = west ? s.ix + (s.w - w) : s.ix;
-      it.y = ar && north ? s.iy + (s.h - it.h) : s.iy;
+      let h;
+      if (ar) h = it.h = Math.round(w / ar);
+      else { el.style.width = w + 'px'; h = contentH(it, el); }
+      const v = R(sx * w / 2, sy * h / 2);
+      it.x = Math.round((anchor.x + v.x - w / 2) * 100) / 100;
+      it.y = Math.round((anchor.y + v.y - h / 2) * 100) / 100;
       place(el, it);
     };
     const up = () => {
@@ -702,6 +883,50 @@
     el.addEventListener('pointermove', move);
     el.addEventListener('pointerup', up);
     el.addEventListener('pointercancel', up);
+  }
+
+  function startRotate(e, el, it) {
+    const b = el.getBoundingClientRect();
+    const c = { x: b.left + b.width / 2, y: b.top + b.height / 2 };
+    const ang = ev => Math.atan2(ev.clientY - c.y, ev.clientX - c.x) * 180 / Math.PI;
+    const a0 = ang(e), r0 = it.rot || 0, sr = rect();
+    const tip = document.createElement('div');
+    tip.className = 'angle-tip';
+    stage.append(tip);
+    el.setPointerCapture(e.pointerId);
+    el.classList.add('rotating');
+    const move = ev => {
+      let d = normDeg(r0 + ang(ev) - a0);
+      if (ev.shiftKey) d = normDeg(Math.round(d / 15) * 15);
+      else for (const k of [-90, 0, 90, 180, -180]) if (Math.abs(d - k) < 3) d = normDeg(k);   // gentle pull to square angles
+      it.rot = d;
+      place(el, it);
+      tip.textContent = `${Math.round(d)}°`;
+      tip.style.left = ev.clientX - sr.left + 16 + 'px';
+      tip.style.top = ev.clientY - sr.top + 16 + 'px';
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      el.classList.remove('rotating');
+      tip.remove();
+      db.put('items', it);
+      touch(it.id);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  }
+
+  function rotateSelected(deg, absolute = false) {
+    for (const it of selectedItems()) {
+      it.rot = absolute ? deg : normDeg((it.rot || 0) + deg);
+      const el = elOf(it.id);
+      if (el) place(el, it);
+      db.put('items', it);
+      touch(it.id);
+    }
   }
 
   world.addEventListener('dblclick', e => {
@@ -815,6 +1040,8 @@
       { label: 'Copy', icon: I.copy, hint: '⌘C', action: () => copySelection() },
       { label: 'Cut', icon: I.cut, hint: '⌘X', action: () => { if (copySelection(true)) { toast(`Cut ${plural(clipboard.length, 'item')} — ⌘V to paste`); removeSelected(); } } },
       'sep',
+      { label: 'Rotate 90°', icon: I.rotate, action: () => rotateSelected(90) },
+      ...(selectedItems().some(i => i.rot) ? [{ label: 'Reset rotation', icon: I.resetRot, action: () => rotateSelected(0, true) }] : []),
       { label: `New project from ${n > 1 ? plural(n, 'item') : 'selection'}`, icon: I.newProject, action: projectFromSelection },
       { label: 'Bring to front', icon: I.front, action: () => bringToFront([...state.sel]) },
       'sep',
@@ -1027,6 +1254,9 @@
   $('#zoomFit').onclick = () => fitAll();
   $('#locate').onclick = goToLastEdited;
   $('#addProject').onclick = () => addProject();
+  $('#addFolder').onclick = () => addFolder();
+  $('#collapsePanel').onclick = togglePanel;
+  $('#expandPanel').onclick = togglePanel;
 
   const typing = t => t.closest?.('input, textarea') || t.isContentEditable;
   document.addEventListener('keydown', e => {
@@ -1038,6 +1268,7 @@
     if (e.metaKey || e.ctrlKey) {
       if (e.key === 'a') { e.preventDefault(); setSelection(itemsHere().map(i => i.id)); }
       if (e.key === 'd') { e.preventDefault(); duplicate(); }
+      if (e.key === '\\') { e.preventDefault(); togglePanel(); }
       return;
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && state.sel.size) { e.preventDefault(); removeSelected(); }
@@ -1069,7 +1300,7 @@
       { kind: 'text', variant: 'heading', text: 'Welcome to DOT', x: -460, y: -300 },
       { kind: 'text', variant: 'subheading', text: 'An infinite canvas for every project', x: -460, y: -232 },
       { kind: 'text', variant: 'paragraph', x: -460, y: -176,
-        text: 'Right-click anywhere to add images, videos or text.\nDrag on empty space to select. Hold Space and drag to pan, ⌘ + scroll or pinch to zoom.\nShift-drag snaps to the dots. Option-drag duplicates. Drag a corner to resize.' },
+        text: 'Right-click anywhere to add images, videos or text.\nDrag on empty space to select. Hold Space and drag to pan, ⌘ + scroll or pinch to zoom.\nShift-drag snaps to the dots. Option-drag duplicates. Drag a corner to resize, or the round handle to rotate.' },
       { kind: 'image', name: 'Example image', w: 240, ar: 4 / 5, x: 20, y: -300,
         blob: exampleArt('#f3a46b', '#d9534f', '<circle cx="400" cy="420" r="190" fill="#fff" fill-opacity=".9"/>') },
       { kind: 'image', name: 'Example image', w: 240, ar: 4 / 5, x: 284, y: -228,
@@ -1087,7 +1318,11 @@
 
   /* ---------------- Boot ---------------- */
   (async () => {
-    [state.projects, state.items] = await Promise.all([db.all('projects'), db.all('items')]);
+    [state.projects, state.items, state.folders] = await Promise.all([db.all('projects'), db.all('items'), db.all('folders')]);
+    state.folders.sort((a, b) => a.createdAt - b.createdAt);
+    let collapsed = false;
+    try { collapsed = localStorage.getItem('dot.collapsed') === '1'; } catch {}
+    setCollapsed(collapsed, false);
     state.items.forEach(normalize);
     state.projects.sort((a, b) => a.createdAt - b.createdAt);
     setTool('select');

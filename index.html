@@ -23,17 +23,18 @@
     </nav>
 
     <!-- Projects panel -->
-    <aside class="panel">
-      <h1 class="panel-title">Projects</h1>
-      <div class="panel-section-label">Your projects</div>
-      <div class="project-list" id="projectList"></div>
-      <button class="add-row" id="addProject"><span class="add-plus">+</span> Add Project</button>
-
-      <div class="divider"></div>
-      <div class="panel-section-label">On this canvas</div>
-      <div class="stat-row"><span class="stat-icon" data-icon="image"></span><span>Images</span><span class="count" id="statImages">0</span></div>
-      <div class="stat-row"><span class="stat-icon" data-icon="video"></span><span>Videos</span><span class="count" id="statVideos">0</span></div>
-      <div class="stat-row"><span class="stat-icon" data-icon="text"></span><span>Text</span><span class="count" id="statText">0</span></div>
+    <aside class="panel" id="panel">
+      <div class="panel-inner">
+        <div class="panel-head">
+          <h1 class="panel-title">Projects</h1>
+          <button class="icon-btn" id="collapsePanel" data-icon="sidebar" title="Hide sidebar (⌘\)" aria-label="Hide sidebar" aria-expanded="true"></button>
+        </div>
+        <div class="project-list" id="projectList"></div>
+        <div class="add-rows">
+          <button class="add-row" id="addProject"><span class="add-plus">+</span> Add Project</button>
+          <button class="add-row" id="addFolder"><span class="add-plus">+</span> Add Folder</button>
+        </div>
+      </div>
     </aside>
 
     <!-- Canvas -->
@@ -48,7 +49,8 @@
       </div>
 
       <div class="topbar">
-        <div class="crumb"><span class="crumb-name" id="crumbName">—</span><span class="crumb-count" id="crumbCount"></span></div>
+        <button class="expand-btn" id="expandPanel" data-icon="sidebar" title="Show sidebar (⌘\)" aria-label="Show sidebar"></button>
+        <div class="crumb"><span class="crumb-folder" id="crumbFolder" hidden></span><span class="crumb-name" id="crumbName">—</span><span class="crumb-count" id="crumbCount"></span></div>
       </div>
 
       <div class="empty" id="empty">

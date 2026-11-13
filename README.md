@@ -8,7 +8,9 @@ An infinite dotted canvas for projects. Projects on the left; on the right, an i
 - Right-click the grid to add an image, video, image link, video link, heading, subheading or paragraph.
 - Drag on empty space to select; right-click a selection to duplicate it, copy it, or turn it into a new project.
 - Hold Space and drag (or use the Hand tool) to pan; ⌘/Ctrl + scroll or pinch to zoom.
-- Shift-drag snaps to the dots. Option/Alt-drag duplicates. Drag a corner to resize.
+- Shift-drag snaps to the dots. Option/Alt-drag duplicates. Drag a corner to resize; drag the round handle to rotate (Shift for 15° steps).
+- Group projects into folders: **+ Add Folder**, then drag projects onto it (or right-click a project → Move to folder).
+- Hide the sidebar with the panel button or ⌘\.
 - ⌘C / ⌘V / ⌘X / ⌘D copy, paste, cut and duplicate. Press L to jump back to the last thing you edited.
 
 Everything is saved in your own browser (IndexedDB); nothing is uploaded.
