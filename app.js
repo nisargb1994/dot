@@ -62,6 +62,8 @@
     projects: svg('<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/>'),
     addProject: svg('<rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M12 8.5v7M8.5 12h7"/>'),
     keyboard: svg('<rect x="2.5" y="6" width="19" height="12" rx="3"/><path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M8 14h8"/>', 2),
+    undo: svg('<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>'),
+    redo: svg('<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>'),
     sidebar: svg('<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/>'),
     newProject: svg('<path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>'),
   };
@@ -485,6 +487,7 @@
     try { localStorage.setItem('dot.current', id); } catch {}
     renderProjects();
     renderItems();
+    syncHistoryButtons();
     const p = project();
     if (p.view) { view = { ...p.view }; applyView(); }
     else if (itemsHere().length) requestAnimationFrame(() => fitAll(false));
@@ -523,6 +526,70 @@
     copyItemsTo(src, p.id);
     renderProjects();
     toast(`Created “${p.name}” with ${plural(src.length, 'item')}`, { label: 'Open', action: () => openProject(p.id) });
+  }
+
+  /* ---------------- Undo / redo ---------------- */
+  // Each project keeps its own history. A step is a snapshot of that project's items taken just
+  // before a change; undo swaps the canvas back to it. Files (blobs) are shared, not copied.
+  const HISTORY_LIMIT = 100;
+  const histories = new Map();
+  const hist = () => {
+    let h = histories.get(state.current);
+    if (!h) histories.set(state.current, h = { undo: [], redo: [] });
+    return h;
+  };
+  const snapshot = () => itemsHere().map(cloneData);
+  function record() {
+    if (!state.current) return;
+    const h = hist();
+    h.undo.push(snapshot());
+    if (h.undo.length > HISTORY_LIMIT) h.undo.shift();
+    h.redo.length = 0;
+    syncHistoryButtons();
+  }
+  // Record once, on the first real change of a gesture (so a click without a drag adds no step).
+  const recorder = () => { let done = false; return () => { if (!done) { done = true; record(); } }; };
+  const signature = it => JSON.stringify({ ...it, blob: undefined });
+
+  function restore(snap) {
+    const pid = state.current;
+    const current = new Map(itemsHere().map(i => [i.id, i]));
+    const next = new Map(snap.map(i => [i.id, i]));
+    for (const id of current.keys()) {
+      if (next.has(id)) continue;
+      db.del('items', id);
+      if (urls.has(id)) { URL.revokeObjectURL(urls.get(id)); urls.delete(id); }
+    }
+    const restored = snap.map(cloneData);
+    for (const it of restored) {
+      const was = current.get(it.id);
+      if (!was || signature(was) !== signature(it)) db.put('items', it);
+    }
+    state.items = state.items.filter(i => i.projectId !== pid).concat(restored);
+    state.sel = new Set([...state.sel].filter(id => next.has(id)));
+    renderItems();
+    renderProjects();
+  }
+  function undo() {
+    endEdit?.();
+    const h = hist();
+    if (!h.undo.length) return toast('Nothing to undo');
+    h.redo.push(snapshot());
+    restore(h.undo.pop());
+    syncHistoryButtons();
+  }
+  function redo() {
+    endEdit?.();
+    const h = hist();
+    if (!h.redo.length) return toast('Nothing to redo');
+    h.undo.push(snapshot());
+    restore(h.redo.pop());
+    syncHistoryButtons();
+  }
+  function syncHistoryButtons() {
+    const h = state.current ? hist() : { undo: [], redo: [] };
+    $('#undoBtn').classList.toggle('disabled', !h.undo.length);
+    $('#redoBtn').classList.toggle('disabled', !h.redo.length);
   }
 
   /* ---------------- Items ---------------- */
@@ -741,6 +808,7 @@
   }
 
   async function addItem(data, at) {
+    record();
     const it = normalize({ id: uid(), projectId: state.current, createdAt: Date.now(), z: ++state.topZ, blob: null, url: null, name: '', ...data });
     if (it.kind === 'text') { it.x = Math.round(at.x); it.y = Math.round(at.y); }
     else { it.x = Math.round(at.x - it.w / 2); it.y = Math.round(at.y - it.h / 2); }
@@ -769,6 +837,7 @@
   }
   async function removeSelected() {
     const ids = [...state.sel];
+    if (ids.length) record();
     for (const id of ids) await removeItem(id);
   }
 
@@ -827,6 +896,7 @@
   }
   const makeClones = (srcs, dx = 0, dy = 0) => copyItemsTo(srcs, state.current, dx, dy);
   async function cloneItems(srcs, dx, dy) {
+    record();
     const made = makeClones(srcs, dx, dy);
     setSelection(made.map(i => i.id));
     if (made.length) touch(made[made.length - 1].id);
@@ -897,7 +967,7 @@
 
   /* ---------------- Text editing ---------------- */
   let endEdit = null;                    // finishes the text edit in progress, if any
-  function startEdit(it, el) {
+  function startEdit(it, el, fresh = false) {
     if (endEdit) endEdit();
     const t = el.querySelector('.txt');
     try { t.contentEditable = 'plaintext-only'; } catch { t.contentEditable = 'true'; }
@@ -915,9 +985,14 @@
       t.contentEditable = 'false';
       el.classList.remove('editing');
       const v = t.innerText.replace(/\s+$/, '').replace(/^\s+/, '');
-      if (!v) { removeItem(it.id); return; }
+      if (!v) {
+        if (fresh) { hist().undo.pop(); syncHistoryButtons(); }   // an abandoned new text box leaves no step behind
+        else record();
+        removeItem(it.id);
+        return;
+      }
       t.textContent = v;
-      if (v !== it.text) { it.text = v; db.put('items', it); }
+      if (v !== it.text) { if (!fresh) record(); it.text = v; db.put('items', it); }
       touch(it.id);
     };
     endEdit = done;
@@ -959,6 +1034,7 @@
       if (!moved && Math.hypot(ev.clientX - s.x, ev.clientY - s.y) < 3) return;
       if (!moved) {
         moved = true;
+        record();
         if (e.altKey) {                                        // Option/Alt-drag: leave originals, drag copies
           const clones = makeClones(group.map(g => g.it));
           const byOrig = new Map(group.map((g, i) => [g.it.id, i]));
@@ -1005,6 +1081,7 @@
 
   function startResize(e, el, it, corner) {
     const s = { x: e.clientX, y: e.clientY, w: it.w, h: contentH(it, el) };
+    const once = recorder();
     const ar = it.kind === 'text' ? null : it.w / it.h;
     const sx = corner.includes('w') ? -1 : 1, sy = corner.includes('n') ? -1 : 1;
     const th = (it.rot || 0) * Math.PI / 180, cos = Math.cos(th), sin = Math.sin(th);
@@ -1015,6 +1092,7 @@
     el.setPointerCapture(e.pointerId);
     el.classList.add('resizing');
     const move = ev => {
+      once();
       const dX = (ev.clientX - s.x) / view.z, dY = (ev.clientY - s.y) / view.z;
       const lx = dX * cos + dY * sin, ly = -dX * sin + dY * cos;   // pointer delta in the item's own axes
       let w = s.w + sx * lx;
@@ -1051,12 +1129,14 @@
     const c = { x: b.left + b.width / 2, y: b.top + b.height / 2 };
     const ang = ev => Math.atan2(ev.clientY - c.y, ev.clientX - c.x) * 180 / Math.PI;
     const a0 = ang(e), r0 = it.rot || 0, sr = rect();
+    const once = recorder();
     const tip = document.createElement('div');
     tip.className = 'angle-tip';
     stage.append(tip);
     el.setPointerCapture(e.pointerId);
     el.classList.add('rotating');
     const move = ev => {
+      once();
       let d = normDeg(r0 + ang(ev) - a0);
       if (ev.shiftKey) d = normDeg(Math.round(d / 15) * 15);
       else for (const k of [-90, 0, 90, 180, -180]) if (Math.abs(d - k) < 3) d = normDeg(k);   // gentle pull to square angles
@@ -1081,6 +1161,7 @@
   }
 
   function rotateSelected(deg, absolute = false) {
+    record();
     for (const it of selectedItems().filter(i => i.kind !== 'line')) {
       it.rot = absolute ? deg : normDeg((it.rot || 0) + deg);
       const el = elOf(it.id);
@@ -1110,6 +1191,7 @@
 
   /* ---------------- Line interactions ---------------- */
   function createLine(a, b, extra = {}) {
+    record();
     const it = normalize({ id: uid(), projectId: state.current, kind: 'line', createdAt: Date.now(), z: ++state.topZ,
       a, b, bend: { t: 0.5, d: 0 }, arrow: 'end', ...extra });
     state.items.push(it);
@@ -1162,7 +1244,9 @@
     el.classList.add('editing-line');
     const other = end === 'a' ? 'b' : 'a';
     let target = null;
+    const once = recorder();
     const move = ev => {
+      once();
       const p = worldPt(ev, ev.shiftKey && end !== 'm');
       if (end === 'm') {
         const A = endPoint(it, 'a'), B = endPoint(it, 'b');
@@ -1195,6 +1279,7 @@
   }
 
   function updateLine(it, change) {
+    record();
     change(it);
     const el = elOf(it.id);
     if (el) drawLine(el, it);
@@ -1301,7 +1386,7 @@
       ...(selectedItems().some(i => i.kind !== 'line') ? [{ label: 'Rotate 90°', icon: I.rotate, action: () => rotateSelected(90) }] : []),
       ...(selectedItems().some(i => i.rot) ? [{ label: 'Reset rotation', icon: I.resetRot, action: () => rotateSelected(0, true) }] : []),
       { label: `New project from ${n > 1 ? plural(n, 'item') : 'selection'}`, icon: I.newProject, action: projectFromSelection },
-      { label: 'Bring to front', icon: I.front, action: () => bringToFront([...state.sel]) },
+      { label: 'Bring to front', icon: I.front, action: () => { record(); bringToFront([...state.sel]); } },
       'sep',
       { label: n > 1 ? `Delete ${plural(n, 'item')}` : 'Delete', icon: I.trash, hint: '⌫', danger: true, action: removeSelected },
     ];
@@ -1349,7 +1434,7 @@
       { heading: 'Add text' },
       ...Object.entries(TEXT).map(([variant, t]) => ({
         label: t.label, icon: I[variant],
-        action: async () => { const { it, el } = await addItem({ kind: 'text', variant, text: '' }, at); startEdit(it, el); },
+        action: async () => { const { it, el } = await addItem({ kind: 'text', variant, text: '' }, at); startEdit(it, el, true); },
       })),
     ]);
   });
@@ -1375,7 +1460,7 @@
   const SHORTCUTS = [
     ['Tools', [['V', 'Select'], ['H  or hold Space', 'Pan'], ['A', 'Draw an arrow'], ['Esc', 'Clear selection']]],
     ['Canvas', [['⌘ + scroll / pinch', 'Zoom'], ['+  −', 'Zoom in / out'], ['⇧0', 'Zoom to 100%'], ['⇧1', 'Fit everything'], ['L', 'Back to last edited'], ['⌘\\', 'Show / hide projects']]],
-    ['Items', [['⌘C  ⌘X  ⌘V', 'Copy, cut, paste'], ['⌘D', 'Duplicate'], ['⌥ + drag', 'Duplicate while dragging'], ['⇧ + drag', 'Snap to the dots'], ['⌘A', 'Select all'], ['⌫', 'Delete']]],
+    ['Items', [['⌘C  ⌘X  ⌘V', 'Copy, cut, paste'], ['⌘Z  ⇧⌘Z', 'Undo, redo'], ['⌘D', 'Duplicate'], ['⌥ + drag', 'Duplicate while dragging'], ['⇧ + drag', 'Snap to the dots'], ['⌘A', 'Select all'], ['⌫', 'Delete']]],
   ];
   function openShortcuts() {
     const cols = SHORTCUTS.map(([title, rows]) => `<section><h3>${title}</h3>${rows.map(([k, d]) => `<div class="sc-row"><span>${d}</span><kbd>${k}</kbd></div>`).join('')}</section>`).join('');
@@ -1541,6 +1626,8 @@
   $('#zoomReset').onclick = () => zoomCenter(1 / view.z);
   $('#zoomFit').onclick = () => fitAll();
   $('#locate').onclick = goToLastEdited;
+  $('#undoBtn').onclick = undo;
+  $('#redoBtn').onclick = redo;
   $('#addProject').onclick = () => addProject();
   $('#addFolder').onclick = () => addFolder();
   $('#railProjects').onclick = togglePanel;
@@ -1559,6 +1646,8 @@
     if (e.metaKey || e.ctrlKey) {
       if (e.key === 'a') { e.preventDefault(); setSelection(itemsHere().map(i => i.id)); }
       if (e.key === 'd') { e.preventDefault(); duplicate(); }
+      if (e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
+      if (e.key.toLowerCase() === 'y' && e.ctrlKey) { e.preventDefault(); redo(); }
       if (e.key === '\\') { e.preventDefault(); togglePanel(); }
       return;
     }
