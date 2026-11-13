@@ -47,6 +47,12 @@
     copy: svg('<rect x="8.5" y="8.5" width="12" height="12" rx="2.5"/><path d="M15.5 8.5V6A2.5 2.5 0 0 0 13 3.5H6A2.5 2.5 0 0 0 3.5 6v7A2.5 2.5 0 0 0 6 15.5h2.5"/>'),
     paste: svg('<path d="M9 4.5H6.5A2 2 0 0 0 4.5 6.5v12a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-12a2 2 0 0 0-2-2H15"/><rect x="9" y="3" width="6" height="3.5" rx="1"/>'),
     cut: svg('<circle cx="6.5" cy="17.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/><path d="M8.5 16 18 4M15.5 16 6 4"/>'),
+    line: svg('<path d="M5 19C9 9 14 13 19 5"/><path d="M14.5 5H19v4.5"/>'),
+    straight: svg('<path d="M5 19 19 5"/><path d="M13 5h6v6"/>'),
+    arrowEnd: svg('<path d="M4 12h15M14 7l5 5-5 5"/>'),
+    arrowBoth: svg('<path d="M5 12h14M9 7l-5 5 5 5M15 7l5 5-5 5"/>'),
+    noArrow: svg('<path d="M4 12h16"/>'),
+    unlink: svg('<path d="M9.5 14.5 7.6 16.4a3 3 0 0 1-4.2-4.2l2.6-2.6M14.5 9.5l1.9-1.9a3 3 0 0 1 4.2 4.2L18 14.4M8 4v2.5M4 8h2.5M16 20v-2.5M20 16h-2.5"/>'),
     rotate: svg('<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4.5V11h-6.5"/>'),
     resetRot: svg('<path d="M4 13a8 8 0 1 0 2.3-5.7"/><path d="M4 4.5V11h6.5"/>'),
     chevron: svg('<path d="m9 6 6 6-6 6"/>', 2),
@@ -113,6 +119,13 @@
   const elOf = id => world.querySelector(`.item[data-id="${id}"]`);
 
   function normalize(it) {
+    if (it.kind === 'line') {
+      it.a = it.a || { x: 0, y: 0 };
+      it.b = it.b || { x: 200, y: -120 };
+      it.bend = it.bend || { t: 0.5, d: 0 };
+      it.arrow = it.arrow || 'end';
+      return it;
+    }
     if (it.kind === 'text') { if (!it.w) it.w = TEXT[it.variant].w; }
     else {
       if (!it.w) it.w = BASE_W;
@@ -121,6 +134,20 @@
     return it;
   }
   const boxOf = it => ({ w: it.w, h: it.kind === 'text' ? (elOf(it.id)?.offsetHeight || 60) : it.h });
+  // World-space bounding box of any item (lines included).
+  function bounds(it) {
+    if (it.kind === 'line') {
+      const g = lineGeom(it);
+      const xs = [g.A.x, g.B.x, g.M.x], ys = [g.A.y, g.B.y, g.M.y];
+      const x = Math.min(...xs), y = Math.min(...ys);
+      return { x, y, w: Math.max(1, Math.max(...xs) - x), h: Math.max(1, Math.max(...ys) - y) };
+    }
+    const b = boxOf(it);
+    return { x: it.x, y: it.y, w: b.w, h: b.h };
+  }
+  const cloneData = it => it.kind === 'line'
+    ? { ...it, a: { ...it.a }, b: { ...it.b }, bend: { ...it.bend } }
+    : { ...it };
 
   const canvas = $('#canvas'), world = $('#world'), stage = $('#stage');
 
@@ -189,7 +216,7 @@
   function resetView() { const r = rect(); view = { x: r.width / 2, y: r.height / 2, z: 1 }; applyView(); }
   function fitView(its, maxZ = 1) {
     const r = rect(), pad = 80;
-    const bx = its.map(i => ({ ...boxOf(i), x: i.x, y: i.y }));
+    const bx = its.map(bounds);
     const minX = Math.min(...bx.map(b => b.x)), minY = Math.min(...bx.map(b => b.y));
     const maxX = Math.max(...bx.map(b => b.x + b.w)), maxY = Math.max(...bx.map(b => b.y + b.h));
     const z = clamp(Math.min((r.width - pad * 2) / (maxX - minX), (r.height - pad * 2) / (maxY - minY)), MIN_Z, maxZ);
@@ -224,9 +251,9 @@
     let it = p && itemById(p.lastEdited);
     if (!it || it.projectId !== state.current) it = here.sort((a, b) => b.createdAt - a.createdAt)[0];
     if (!it) return toast('Nothing on this canvas yet');
-    const r = rect(), b = boxOf(it);
+    const r = rect(), b = bounds(it);
     const z = clamp(Math.min(1, (r.width * 0.6) / b.w, (r.height * 0.6) / b.h), MIN_Z, MAX_Z);
-    animateTo({ z, x: r.width / 2 - (it.x + b.w / 2) * z, y: r.height / 2 - (it.y + b.h / 2) * z });
+    animateTo({ z, x: r.width / 2 - (b.x + b.w / 2) * z, y: r.height / 2 - (b.y + b.h / 2) * z });
     setSelection([it.id]);
     const el = elOf(it.id);
     if (el) { el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash'); }
@@ -489,11 +516,7 @@
     const p = { id: uid(), name: `${cur.name} — selection`, createdAt: Date.now(), view: null, lastEdited: null, folderId: folderOf(cur) ? cur.folderId : null };
     state.projects.push(p);
     await db.put('projects', p);
-    for (const it of src.sort((a, b) => (a.z || 0) - (b.z || 0))) {
-      const copy = { ...it, id: uid(), projectId: p.id, createdAt: Date.now() };
-      state.items.push(copy);
-      await db.put('items', copy);
-    }
+    copyItemsTo(src, p.id);
     renderProjects();
     toast(`Created “${p.name}” with ${plural(src.length, 'item')}`, { label: 'Open', action: () => openProject(p.id) });
   }
@@ -504,16 +527,112 @@
     const its = itemsHere().sort((a, b) => (a.z || 0) - (b.z || 0));
     state.topZ = Math.max(1, ...its.map(i => i.z || 0));
     its.forEach(it => world.append(itemEl(it)));
+    its.filter(i => i.kind === 'line').forEach(ln => drawLine(elOf(ln.id), ln));
     syncSel();
   }
 
   function place(el, it) {
+    if (it.kind === 'line') { el.style.zIndex = it.z || 0; return drawLine(el, it); }
     el.style.left = it.x + 'px';
     el.style.top = it.y + 'px';
     el.style.width = it.w + 'px';
     if (it.kind !== 'text') el.style.height = it.h + 'px';
     el.style.zIndex = it.z || 0;
     el.style.transform = it.rot ? `rotate(${it.rot}deg)` : '';
+    refreshLinesFor(it.id);
+  }
+
+  /* ---------------- Lines / arrows ---------------- */
+  const LINE_GAP = 6;                    // space between an attached end and the item's edge
+  const HEAD = 13;                       // arrowhead length (world units)
+
+  // An attached end sits on the item's centre before clipping; a free end is wherever it was put.
+  function endPoint(it, k) {
+    const end = it[k];
+    const t = end.attach && itemById(end.attach);
+    if (t && t.projectId === it.projectId && t.kind !== 'line') {
+      const el = elOf(t.id);
+      const h = t.kind === 'text' ? (el ? el.offsetHeight - 8 : 60) : t.h;
+      return { x: t.x + t.w / 2, y: t.y + h / 2, item: t, w: t.w, h };
+    }
+    return { x: end.x, y: end.y };
+  }
+  // Pull an attached end from the item's centre out to its edge, aiming at `toward`.
+  function clipToItem(P, toward) {
+    const th = -(P.item.rot || 0) * Math.PI / 180, cos = Math.cos(th), sin = Math.sin(th);
+    const vx = toward.x - P.x, vy = toward.y - P.y;
+    const lx = vx * cos - vy * sin, ly = vx * sin + vy * cos;
+    if (!lx && !ly) return P;
+    const hw = P.w / 2 + LINE_GAP, hh = P.h / 2 + LINE_GAP;
+    const k = Math.min(lx ? hw / Math.abs(lx) : Infinity, ly ? hh / Math.abs(ly) : Infinity);
+    if (k >= 1) return P;
+    return { x: P.x + vx * k, y: P.y + vy * k, item: P.item };
+  }
+  // Quadratic curve through A, M (the middle handle) and B. bend = {t, d}: M's position along and across the A→B chord.
+  function lineGeom(it) {
+    let A = endPoint(it, 'a'), B = endPoint(it, 'b');
+    const dx = B.x - A.x, dy = B.y - A.y, L = Math.hypot(dx, dy) || 1;
+    const n = { x: -dy / L, y: dx / L };
+    const { t, d } = it.bend;
+    let M = { x: A.x + dx * t + n.x * d * L, y: A.y + dy * t + n.y * d * L };
+    let C = { x: 2 * M.x - (A.x + B.x) / 2, y: 2 * M.y - (A.y + B.y) / 2 };
+    if (A.item) A = clipToItem(A, C);
+    if (B.item) B = clipToItem(B, C);
+    if (!d) M = { x: (A.x + B.x) / 2, y: (A.y + B.y) / 2 };       // straight: keep the handle centred
+    C = { x: 2 * M.x - (A.x + B.x) / 2, y: 2 * M.y - (A.y + B.y) / 2 };
+    return { A, B, M, C };
+  }
+  function drawLine(el, it) {
+    const g = lineGeom(it);
+    // Remember where attached ends actually are, so copies and detaching keep the same spot.
+    for (const [k, P] of [['a', g.A], ['b', g.B]]) if (it[k].attach) { it[k].x = Math.round(P.x); it[k].y = Math.round(P.y); }
+    const unit = (from, to) => { const vx = to.x - from.x, vy = to.y - from.y, l = Math.hypot(vx, vy) || 1; return { x: vx / l, y: vy / l }; };
+    const head = (tip, dir) => {
+      const bx = tip.x - dir.x * HEAD, by = tip.y - dir.y * HEAD, px = -dir.y * HEAD * 0.45, py = dir.x * HEAD * 0.45;
+      return `M${tip.x},${tip.y} L${bx + px},${by + py} L${bx - px},${by - py} Z`;
+    };
+    const near = (P, Q) => Math.hypot(P.x - Q.x, P.y - Q.y) < 1;
+    const dB = unit(near(g.C, g.B) ? g.A : g.C, g.B), dA = unit(near(g.C, g.A) ? g.B : g.C, g.A);
+    const endB = it.arrow !== 'none', endA = it.arrow === 'both';
+    const B2 = endB ? { x: g.B.x - dB.x * HEAD * 0.7, y: g.B.y - dB.y * HEAD * 0.7 } : g.B;
+    const A2 = endA ? { x: g.A.x - dA.x * HEAD * 0.7, y: g.A.y - dA.y * HEAD * 0.7 } : g.A;
+    const d = `M${A2.x},${A2.y} Q${g.C.x},${g.C.y} ${B2.x},${B2.y}`;
+    el.querySelector('.hit').setAttribute('d', `M${g.A.x},${g.A.y} Q${g.C.x},${g.C.y} ${g.B.x},${g.B.y}`);
+    el.querySelector('.stroke').setAttribute('d', d);
+    el.querySelector('.head-b').setAttribute('d', endB ? head(g.B, dB) : '');
+    el.querySelector('.head-a').setAttribute('d', endA ? head(g.A, dA) : '');
+    for (const [k, P] of [['a', g.A], ['m', g.M], ['b', g.B]]) {
+      const h = el.querySelector(`.lh[data-end="${k}"]`);
+      h.style.left = P.x + 'px'; h.style.top = P.y + 'px';
+      if (k !== 'm') h.classList.toggle('attached', !!it[k].attach);
+    }
+  }
+  function refreshLinesFor(id) {
+    for (const ln of state.items) {
+      if (ln.kind !== 'line' || (ln.a.attach !== id && ln.b.attach !== id)) continue;
+      const el = elOf(ln.id);
+      if (el) drawLine(el, ln);
+    }
+  }
+  // Topmost image/video/text under a world point (rotation aware).
+  function itemAt(p, excludeId) {
+    const its = itemsHere().filter(i => i.kind !== 'line' && i.id !== excludeId).sort((a, b) => (b.z || 0) - (a.z || 0));
+    for (const t of its) {
+      const b = bounds(t), cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+      const th = -(t.rot || 0) * Math.PI / 180;
+      const vx = p.x - cx, vy = p.y - cy;
+      const lx = vx * Math.cos(th) - vy * Math.sin(th), ly = vx * Math.sin(th) + vy * Math.cos(th);
+      if (Math.abs(lx) <= b.w / 2 && Math.abs(ly) <= b.h / 2) return t;
+    }
+    return null;
+  }
+  let linkTargetEl = null;
+  function setLinkTarget(t) {
+    const el = t ? elOf(t.id) : null;
+    if (el === linkTargetEl) return;
+    linkTargetEl?.classList.remove('link-target');
+    linkTargetEl = el;
+    el?.classList.add('link-target');
   }
   const normDeg = d => { d = ((d % 360) + 540) % 360 - 180; return d === -180 ? 180 : Math.round(d * 10) / 10; };
 
@@ -530,6 +649,14 @@
   function itemEl(it) {
     const el = document.createElement('div');
     el.dataset.id = it.id;
+
+    if (it.kind === 'line') {
+      el.className = 'item line';
+      el.innerHTML = `<svg class="lsvg" aria-hidden="true"><path class="hit"/><path class="stroke"/><path class="head head-b"/><path class="head head-a"/></svg>
+        <div class="lh" data-end="a" title="Drag onto an item to attach"></div><div class="lh lh-mid" data-end="m" title="Drag to curve"></div><div class="lh" data-end="b" title="Drag onto an item to attach"></div>`;
+      place(el, it);
+      return el;
+    }
 
     if (it.kind === 'text') {
       el.className = `item text t-${it.variant}`;
@@ -624,6 +751,12 @@
   }
 
   async function removeItem(id, rerender = true) {
+    for (const ln of state.items) {
+      if (ln.kind !== 'line' || ln.id === id) continue;
+      let hit = false;
+      for (const k of ['a', 'b']) if (ln[k].attach === id) { delete ln[k].attach; hit = true; }
+      if (hit) { db.put('items', ln); const e = elOf(ln.id); if (e) drawLine(e, ln); }
+    }
     state.items = state.items.filter(i => i.id !== id);
     if (urls.has(id)) { URL.revokeObjectURL(urls.get(id)); urls.delete(id); }
     await db.del('items', id);
@@ -663,16 +796,32 @@
 
   // Every copy is a full, independent item: uploaded files are stored again with the copy.
   // Synchronous so Option/Alt-drag can swap to the copies mid-gesture; saving happens in the background.
-  function makeClones(srcs, dx = 0, dy = 0) {
-    return [...srcs].sort((a, b) => (a.z || 0) - (b.z || 0)).map(src => {
-      const it = { ...src, id: uid(), projectId: state.current, createdAt: Date.now(), z: ++state.topZ,
-        x: Math.round(src.x + dx), y: Math.round(src.y + dy) };
+  // Lines whose ends point at items copied in the same batch are re-pointed at the copies.
+  function copyItemsTo(srcs, projectId, dx = 0, dy = 0) {
+    const ordered = [...srcs].sort((a, b) => (a.z || 0) - (b.z || 0));
+    const idMap = new Map(ordered.map(s => [s.id, uid()]));
+    const made = ordered.map(src => {
+      const it = { ...cloneData(src), id: idMap.get(src.id), projectId, createdAt: Date.now(), z: ++state.topZ };
+      if (it.kind === 'line') {
+        for (const k of ['a', 'b']) {
+          const end = it[k];
+          if (end.attach && idMap.has(end.attach)) { end.attach = idMap.get(end.attach); continue; }
+          const t = end.attach && itemById(end.attach);
+          if (end.attach && !(t && t.projectId === projectId)) delete end.attach;
+          if (!end.attach) { end.x = Math.round(end.x + dx); end.y = Math.round(end.y + dy); }
+        }
+      } else { it.x = Math.round(src.x + dx); it.y = Math.round(src.y + dy); }
       state.items.push(it);
       db.put('items', it);
-      world.append(itemEl(it));
       return it;
     });
+    if (projectId === state.current) {
+      made.forEach(it => world.append(itemEl(it)));
+      made.filter(i => i.kind === 'line').forEach(ln => drawLine(elOf(ln.id), ln));
+    }
+    return made;
   }
+  const makeClones = (srcs, dx = 0, dy = 0) => copyItemsTo(srcs, state.current, dx, dy);
   async function cloneItems(srcs, dx, dy) {
     const made = makeClones(srcs, dx, dy);
     setSelection(made.map(i => i.id));
@@ -688,7 +837,7 @@
   function copySelection(quiet) {
     const s = selectedItems();
     if (!s.length) return false;
-    clipboard = s.map(i => ({ ...i }));
+    clipboard = s.map(cloneData);
     lastPaste = { key: '', n: 0 };
     if (!quiet) toast(`Copied ${plural(s.length, 'item')} — ⌘V to paste`);
     return true;
@@ -696,7 +845,7 @@
   // Paste keeps the group's layout and centres it on `at` (cursor, right-click point or view centre).
   function pasteAt(at) {
     if (!clipboard.length) return;
-    const bx = clipboard.map(i => ({ x: i.x, y: i.y, ...boxOf(i) }));
+    const bx = clipboard.map(bounds);
     const cx = (Math.min(...bx.map(b => b.x)) + Math.max(...bx.map(b => b.x + b.w))) / 2;
     const cy = (Math.min(...bx.map(b => b.y)) + Math.max(...bx.map(b => b.y + b.h))) / 2;
     const key = `${state.current}:${Math.round(at.x)}:${Math.round(at.y)}`;
@@ -777,11 +926,13 @@
   world.addEventListener('pointerdown', e => {
     if (e.target.isContentEditable) { e.stopPropagation(); return; }   // caret placement while editing text
     const el = e.target.closest('.item');
-    if (!el || e.button !== 0 || panning()) return;                   // hand tool: let the canvas pan
+    if (!el || e.button !== 0 || panning() || state.tool === 'line') return;   // hand/line tool: the canvas handles it
     e.stopPropagation();
     closeCtx();
     endEdit?.();
     const it = itemById(el.dataset.id);
+    const lh = e.target.closest('.lh');
+    if (lh) { setSelection([it.id]); return startLineHandle(e, el, it, lh.dataset.end); }
     if (e.target.closest('.rot-handle')) return startRotate(e, el, it);
     const handle = e.target.closest('.handle');
     if (handle) return startResize(e, el, it, handle.dataset.corner);
@@ -793,9 +944,11 @@
   });
 
   function startMove(e, el, prim, wasSelected) {
-    let group = [...state.sel].map(itemById).filter(Boolean).map(it => ({ it, el: elOf(it.id), x: it.x, y: it.y }));
+    const snapOf = it => ({ it, el: elOf(it.id), x: it.x, y: it.y, a: it.a && { ...it.a }, b: it.b && { ...it.b } });
+    let group = [...state.sel].map(itemById).filter(Boolean).map(snapOf);
     bringToFront(group.map(g => g.it.id));
-    const s = { x: e.clientX, y: e.clientY, px: prim.x, py: prim.y };
+    const ref = it => it.kind === 'line' ? it.a : it;
+    const s = { x: e.clientX, y: e.clientY, px: ref(prim).x, py: ref(prim).y };
     let moved = false, cloned = false;
     el.setPointerCapture(e.pointerId);
     const move = ev => {
@@ -806,7 +959,7 @@
           const clones = makeClones(group.map(g => g.it));
           const byOrig = new Map(group.map((g, i) => [g.it.id, i]));
           const sorted = [...group].sort((a, b) => (a.it.z || 0) - (b.it.z || 0));
-          group = clones.map((c, i) => ({ it: c, el: elOf(c.id), x: c.x, y: c.y, from: sorted[i].it.id }));
+          group = clones.map((c, i) => ({ ...snapOf(c), from: sorted[i].it.id }));
           prim = group.find(g => g.from === prim.id)?.it || prim;
           setSelection(group.map(g => g.it.id));
           renderProjects();
@@ -820,8 +973,12 @@
         dx = p.x - s.px; dy = p.y - s.py;
       }
       for (const g of group) {
-        g.it.x = Math.round((g.x + dx) * 100) / 100;
-        g.it.y = Math.round((g.y + dy) * 100) / 100;
+        if (g.it.kind === 'line') {                            // free ends move; attached ends follow their item
+          for (const k of ['a', 'b']) if (!g.it[k].attach) { g.it[k].x = Math.round((g[k].x + dx) * 100) / 100; g.it[k].y = Math.round((g[k].y + dy) * 100) / 100; }
+        } else {
+          g.it.x = Math.round((g.x + dx) * 100) / 100;
+          g.it.y = Math.round((g.y + dy) * 100) / 100;
+        }
         if (g.el) place(g.el, g.it);
       }
     };
@@ -920,7 +1077,7 @@
   }
 
   function rotateSelected(deg, absolute = false) {
-    for (const it of selectedItems()) {
+    for (const it of selectedItems().filter(i => i.kind !== 'line')) {
       it.rot = absolute ? deg : normDeg((it.rot || 0) + deg);
       const el = elOf(it.id);
       if (el) place(el, it);
@@ -934,6 +1091,7 @@
     if (!el || e.target.isContentEditable || panning()) return;
     const it = itemById(el.dataset.id);
     if (it.kind === 'text') startEdit(it, el);
+    else if (it.kind === 'line') updateLine(it, l => { l.bend = { t: 0.5, d: l.bend.d ? 0 : 0.25 }; });   // double-click toggles a curve
     else openLightbox(it);
   });
 
@@ -942,8 +1100,103 @@
     closeCtx();
     endEdit?.();
     if (e.button === 1 || (e.button === 0 && panning())) { e.preventDefault(); return startPan(e); }
+    if (e.button === 0 && state.tool === 'line') { e.preventDefault(); return startDrawLine(e); }
     if (e.button === 0) startMarquee(e);
   });
+
+  /* ---------------- Line interactions ---------------- */
+  function createLine(a, b, extra = {}) {
+    const it = normalize({ id: uid(), projectId: state.current, kind: 'line', createdAt: Date.now(), z: ++state.topZ,
+      a, b, bend: { t: 0.5, d: 0 }, arrow: 'end', ...extra });
+    state.items.push(it);
+    const el = itemEl(it);
+    world.append(el);
+    drawLine(el, it);
+    setSelection([it.id]);
+    return { it, el };
+  }
+  const worldPt = (ev, snap) => { const p = toWorld(ev.clientX, ev.clientY); return snap ? snapWorld(p.x, p.y) : p; };
+
+  // Line tool: press (on empty space or on an item) and drag to the end point.
+  function startDrawLine(e) {
+    const p0 = toWorld(e.clientX, e.clientY);
+    const from = itemAt(p0);
+    const { it, el } = createLine(from ? { x: p0.x, y: p0.y, attach: from.id } : { x: p0.x, y: p0.y }, { x: p0.x, y: p0.y });
+    canvas.setPointerCapture(e.pointerId);
+    let target = null;
+    const move = ev => {
+      const p = worldPt(ev, ev.shiftKey);
+      target = itemAt(p, from?.id);
+      setLinkTarget(target);
+      it.b = { x: p.x, y: p.y };
+      drawLine(el, it);
+    };
+    const up = ev => {
+      canvas.removeEventListener('pointermove', move);
+      canvas.removeEventListener('pointerup', up);
+      canvas.removeEventListener('pointercancel', up);
+      setLinkTarget(null);
+      if (Math.hypot(ev.clientX - e.clientX, ev.clientY - e.clientY) < 8) {
+        it.b = { x: p0.x + 200, y: p0.y - 120 };                     // a click makes a standard-length arrow
+        target = null;
+      }
+      if (target) it.b.attach = target.id;
+      drawLine(el, it);
+      db.put('items', it);
+      touch(it.id);
+      renderProjects();
+      setTool('select');
+    };
+    canvas.addEventListener('pointermove', move);
+    canvas.addEventListener('pointerup', up);
+    canvas.addEventListener('pointercancel', up);
+  }
+
+  // Drag an end (attaches when dropped on an item) or the middle (curves the line).
+  function startLineHandle(e, el, it, end) {
+    el.setPointerCapture(e.pointerId);
+    el.classList.add('editing-line');
+    const other = end === 'a' ? 'b' : 'a';
+    let target = null;
+    const move = ev => {
+      const p = worldPt(ev, ev.shiftKey && end !== 'm');
+      if (end === 'm') {
+        const A = endPoint(it, 'a'), B = endPoint(it, 'b');
+        const dx = B.x - A.x, dy = B.y - A.y, L2 = dx * dx + dy * dy || 1, L = Math.sqrt(L2);
+        let t = ((p.x - A.x) * dx + (p.y - A.y) * dy) / L2;
+        let d = ((p.x - A.x) * -dy + (p.y - A.y) * dx) / L2;      // signed offset across the chord, relative to length
+        if (Math.abs(d) * L < 8) { d = 0; t = 0.5; }                 // snap back to straight when close
+        it.bend = { t: clamp(t, -1, 2), d: clamp(d, -3, 3) };
+      } else {
+        target = itemAt(p, it[other].attach);
+        setLinkTarget(target);
+        it[end] = { x: p.x, y: p.y };
+      }
+      drawLine(el, it);
+    };
+    const up = () => {
+      el.removeEventListener('pointermove', move);
+      el.removeEventListener('pointerup', up);
+      el.removeEventListener('pointercancel', up);
+      el.classList.remove('editing-line');
+      setLinkTarget(null);
+      if (target) it[end].attach = target.id;
+      drawLine(el, it);
+      db.put('items', it);
+      touch(it.id);
+    };
+    el.addEventListener('pointermove', move);
+    el.addEventListener('pointerup', up);
+    el.addEventListener('pointercancel', up);
+  }
+
+  function updateLine(it, change) {
+    change(it);
+    const el = elOf(it.id);
+    if (el) drawLine(el, it);
+    db.put('items', it);
+    touch(it.id);
+  }
 
   function startPan(e) {
     let lx = e.clientX, ly = e.clientY;
@@ -966,7 +1219,7 @@
     const base = e.shiftKey ? new Set(state.sel) : new Set();
     if (!e.shiftKey) setSelection([]);
     const r = rect(), sx = e.clientX, sy = e.clientY;
-    const boxes = [...world.querySelectorAll('.item')].map(el => ({ id: el.dataset.id, r: el.getBoundingClientRect() }));
+    const boxes = [...world.querySelectorAll('.item')].map(el => ({ id: el.dataset.id, r: (el.classList.contains('line') ? el.querySelector('.stroke') : el).getBoundingClientRect() }));
     let box = null;
     canvas.setPointerCapture(e.pointerId);
     const move = ev => {
@@ -1008,6 +1261,7 @@
     state.tool = t;
     document.querySelectorAll('[data-tool]').forEach(b => b.classList.toggle('active', b.dataset.tool === t));
     canvas.classList.toggle('tool-hand', panning());
+    canvas.classList.toggle('tool-line', t === 'line');
   }
   document.querySelectorAll('[data-tool]').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
 
@@ -1040,7 +1294,7 @@
       { label: 'Copy', icon: I.copy, hint: '⌘C', action: () => copySelection() },
       { label: 'Cut', icon: I.cut, hint: '⌘X', action: () => { if (copySelection(true)) { toast(`Cut ${plural(clipboard.length, 'item')} — ⌘V to paste`); removeSelected(); } } },
       'sep',
-      { label: 'Rotate 90°', icon: I.rotate, action: () => rotateSelected(90) },
+      ...(selectedItems().some(i => i.kind !== 'line') ? [{ label: 'Rotate 90°', icon: I.rotate, action: () => rotateSelected(90) }] : []),
       ...(selectedItems().some(i => i.rot) ? [{ label: 'Reset rotation', icon: I.resetRot, action: () => rotateSelected(0, true) }] : []),
       { label: `New project from ${n > 1 ? plural(n, 'item') : 'selection'}`, icon: I.newProject, action: projectFromSelection },
       { label: 'Bring to front', icon: I.front, action: () => bringToFront([...state.sel]) },
@@ -1056,6 +1310,15 @@
       const it = itemById(el.dataset.id);
       if (!state.sel.has(it.id)) setSelection([it.id]);
       const first = state.sel.size > 1 ? [{ heading: `${plural(state.sel.size, 'item')} selected` }]
+        : it.kind === 'line' ? [
+            { heading: 'Arrowheads' },
+            { label: 'Arrow at end', icon: I.arrowEnd, hint: it.arrow === 'end' ? '✓' : '', action: () => updateLine(it, l => { l.arrow = 'end'; }) },
+            { label: 'Arrows at both ends', icon: I.arrowBoth, hint: it.arrow === 'both' ? '✓' : '', action: () => updateLine(it, l => { l.arrow = 'both'; }) },
+            { label: 'No arrows', icon: I.noArrow, hint: it.arrow === 'none' ? '✓' : '', action: () => updateLine(it, l => { l.arrow = 'none'; }) },
+            'sep',
+            ...(it.bend.d ? [{ label: 'Straighten', icon: I.straight, action: () => updateLine(it, l => { l.bend = { t: 0.5, d: 0 }; }) }] : []),
+            ...(it.a.attach || it.b.attach ? [{ label: 'Detach ends', icon: I.unlink, action: () => updateLine(it, l => { delete l.a.attach; delete l.b.attach; }) }] : []),
+          ]
         : it.kind === 'text' ? [{ label: 'Edit text', icon: I.edit, action: () => startEdit(it, el) }]
         : [{ label: 'Open', icon: I.open, action: () => openLightbox(it) }];
       openCtx(e.clientX, e.clientY, [...first, ...selectionEntries()]);
@@ -1072,6 +1335,12 @@
       { label: 'Add Video', icon: I.video, action: () => openAddModal('video', 'file', at) },
       { label: 'Add Image Link', icon: I.link, action: () => openAddModal('image', 'link', at) },
       { label: 'Add Video Link', icon: I.link, action: () => openAddModal('video', 'link', at) },
+      'sep',
+      { heading: 'Add connector' },
+      { label: 'Add Line', icon: I.line, hint: 'A', action: () => {
+        const { it } = createLine({ x: at.x, y: at.y }, { x: at.x + 200, y: at.y - 120 });
+        db.put('items', it); touch(it.id); renderProjects();
+      } },
       'sep',
       { heading: 'Add text' },
       ...Object.entries(TEXT).map(([variant, t]) => ({
@@ -1209,7 +1478,7 @@
   function closeLightbox() { lb.hidden = true; lb.innerHTML = ''; }
   lb.addEventListener('click', e => { if (e.target === lb || e.target.closest('.lb-close')) closeLightbox(); });
   function openLightbox(it) {
-    if (!it || it.kind === 'text') return;
+    if (!it || it.kind === 'text' || it.kind === 'line') return;
     lb.innerHTML = '<button class="lb-close" title="Close">×</button>';
     let node;
     if (it.kind === 'image') {
@@ -1261,7 +1530,7 @@
   const typing = t => t.closest?.('input, textarea') || t.isContentEditable;
   document.addEventListener('keydown', e => {
     if (typing(e.target)) return;
-    if (e.key === 'Escape') { closeCtx(); closeModal(); closeLightbox(); setSelection([]); return; }
+    if (e.key === 'Escape') { closeCtx(); closeModal(); closeLightbox(); setSelection([]); if (state.tool === 'line') setTool('select'); return; }
     if (!modal.hidden || !lb.hidden) return;
     if (e.key === 'Alt') canvas.classList.add('alt');
     if (e.code === 'Space') { e.preventDefault(); if (!state.space) { state.space = true; canvas.classList.add('tool-hand'); } return; }
@@ -1278,6 +1547,7 @@
     else if (e.shiftKey && e.code === 'Digit1') fitAll();
     else if (e.key === 'v' || e.key === 'V') setTool('select');
     else if (e.key === 'h' || e.key === 'H') setTool('hand');
+    else if (e.key === 'a' || e.key === 'A') setTool('line');
     else if (e.key === 'l' || e.key === 'L') goToLastEdited();
   });
   addEventListener('blur', () => canvas.classList.remove('alt'));
@@ -1300,7 +1570,7 @@
       { kind: 'text', variant: 'heading', text: 'Welcome to DOT', x: -460, y: -300 },
       { kind: 'text', variant: 'subheading', text: 'An infinite canvas for every project', x: -460, y: -232 },
       { kind: 'text', variant: 'paragraph', x: -460, y: -176,
-        text: 'Right-click anywhere to add images, videos or text.\nDrag on empty space to select. Hold Space and drag to pan, ⌘ + scroll or pinch to zoom.\nShift-drag snaps to the dots. Option-drag duplicates. Drag a corner to resize, or the round handle to rotate.' },
+        text: 'Right-click anywhere to add images, videos or text.\nDrag on empty space to select. Hold Space and drag to pan, ⌘ + scroll or pinch to zoom.\nShift-drag snaps to the dots. Option-drag duplicates. Drag a corner to resize, or the round handle to rotate.\nPress A to draw arrows: drop an end on an item to attach it, drag the middle to curve it.' },
       { kind: 'image', name: 'Example image', w: 240, ar: 4 / 5, x: 20, y: -300,
         blob: exampleArt('#f3a46b', '#d9534f', '<circle cx="400" cy="420" r="190" fill="#fff" fill-opacity=".9"/>') },
       { kind: 'image', name: 'Example image', w: 240, ar: 4 / 5, x: 284, y: -228,

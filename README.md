@@ -9,6 +9,7 @@ An infinite dotted canvas for projects. Projects on the left; on the right, an i
 - Drag on empty space to select; right-click a selection to duplicate it, copy it, or turn it into a new project.
 - Hold Space and drag (or use the Hand tool) to pan; ⌘/Ctrl + scroll or pinch to zoom.
 - Shift-drag snaps to the dots. Option/Alt-drag duplicates. Drag a corner to resize; drag the round handle to rotate (Shift for 15° steps).
+- Arrows: press **A** (or right-click → Add Line) and drag. Drop an end on an image, video or text to attach it — it follows the item when moved, resized or rotated. Drag the middle dot to curve; right-click for arrowheads, Straighten or Detach.
 - Group projects into folders: **+ Add Folder**, then drag projects onto it (or right-click a project → Move to folder).
 - Hide the sidebar with the panel button or ⌘\.
 - ⌘C / ⌘V / ⌘X / ⌘D copy, paste, cut and duplicate. Press L to jump back to the last thing you edited.
