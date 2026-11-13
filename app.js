@@ -53,6 +53,7 @@
     arrowBoth: svg('<path d="M5 12h14M9 7l-5 5 5 5M15 7l5 5-5 5"/>'),
     noArrow: svg('<path d="M4 12h16"/>'),
     unlink: svg('<path d="M9.5 14.5 7.6 16.4a3 3 0 0 1-4.2-4.2l2.6-2.6M14.5 9.5l1.9-1.9a3 3 0 0 1 4.2 4.2L18 14.4M8 4v2.5M4 8h2.5M16 20v-2.5M20 16h-2.5"/>'),
+    resize: svg('<path d="M7 7l10 10M7 7h5M7 7v5M17 17h-5M17 17v-5"/>', 2.2),
     rotate: svg('<path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4.5V11h-6.5"/>'),
     resetRot: svg('<path d="M4 13a8 8 0 1 0 2.3-5.7"/><path d="M4 4.5V11h6.5"/>'),
     chevron: svg('<path d="m9 6 6 6-6 6"/>', 2),
@@ -793,16 +794,17 @@
       el.append(media, badge);
     }
 
-    for (const c of ['nw', 'ne', 'sw', 'se']) {
-      const h = document.createElement('div');
-      h.className = `handle h-${c}`;
-      h.dataset.corner = c;
-      el.append(h);
-    }
+    // Bottom-right resizes, top-right rotates.
+    const h = document.createElement('div');
+    h.className = 'handle h-se';
+    h.dataset.corner = 'se';
+    h.title = 'Drag to resize · Shift snaps to the dots';
+    h.innerHTML = I.resize;
     const rh = document.createElement('div');
     rh.className = 'rot-handle';
     rh.title = 'Drag to rotate · Shift for 15° steps';
-    el.append(rh);
+    rh.innerHTML = I.rotate;
+    el.append(h, rh);
     place(el, it);
     return el;
   }

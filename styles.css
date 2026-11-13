@@ -189,32 +189,21 @@ svg { display: block; }
 @keyframes flash { 0%, 35% { box-shadow: 0 0 0 calc(14px * var(--iz, 1)) rgba(18,18,20,.16); } 100% { box-shadow: 0 0 0 0 rgba(18,18,20,0); } }
 
 /* Resize handles: constant on-screen size whatever the zoom */
-.handle {
-  position: absolute; display: none; z-index: 3;
-  width: calc(12px * var(--iz, 1)); height: calc(12px * var(--iz, 1));
-  background: #fff; border: calc(1.5px * var(--iz, 1)) solid #121214; border-radius: calc(3px * var(--iz, 1));
+.handle, .rot-handle {
+  position: absolute; display: none; z-index: 3; place-items: center;
+  width: calc(22px * var(--iz, 1)); height: calc(22px * var(--iz, 1));
   transform: translate(-50%, -50%);
+  border-radius: 50%; background: #fff; color: #121214;
+  border: calc(1.5px * var(--iz, 1)) solid #121214;
+  box-shadow: 0 calc(1px * var(--iz, 1)) calc(4px * var(--iz, 1)) rgba(0,0,0,.18);
 }
-.h-nw { left: calc(-3px * var(--iz, 1)); top: calc(-3px * var(--iz, 1)); cursor: nwse-resize; }
-.h-ne { left: calc(100% + 3px * var(--iz, 1)); top: calc(-3px * var(--iz, 1)); cursor: nesw-resize; }
-.h-sw { left: calc(-3px * var(--iz, 1)); top: calc(100% + 3px * var(--iz, 1)); cursor: nesw-resize; }
-.h-se { left: calc(100% + 3px * var(--iz, 1)); top: calc(100% + 3px * var(--iz, 1)); cursor: nwse-resize; }
+.handle svg, .rot-handle svg { width: calc(13px * var(--iz, 1)); height: calc(13px * var(--iz, 1)); pointer-events: none; }
+.handle:hover, .rot-handle:hover { background: #121214; color: #fff; }
+.h-se { left: calc(100% + 4px * var(--iz, 1)); top: calc(100% + 4px * var(--iz, 1)); cursor: nwse-resize; }
+.rot-handle { left: calc(100% + 4px * var(--iz, 1)); top: calc(-4px * var(--iz, 1)); cursor: grab; }
 .world:not(.multi) .item.selected:not(.editing) .handle,
-.world:not(.multi) .item.selected:not(.editing) .rot-handle { display: block; }
+.world:not(.multi) .item.selected:not(.editing) .rot-handle { display: grid; }
 .canvas.tool-hand .rot-handle { display: none !important; }
-.rot-handle {
-  position: absolute; display: none; z-index: 3;
-  left: 50%; top: calc(-30px * var(--iz, 1));
-  width: calc(14px * var(--iz, 1)); height: calc(14px * var(--iz, 1));
-  transform: translate(-50%, -50%);
-  border-radius: 50%; background: #fff; border: calc(1.5px * var(--iz, 1)) solid #121214;
-  cursor: grab;
-}
-.rot-handle::after {
-  content: ""; position: absolute; left: 50%; top: 100%;
-  width: calc(1.5px * var(--iz, 1)); height: calc(20px * var(--iz, 1));
-  background: #121214; transform: translateX(-50%);
-}
 .item.rotating, .item.rotating .rot-handle { cursor: grabbing; }
 .angle-tip {
   position: absolute; z-index: 6; pointer-events: none;
