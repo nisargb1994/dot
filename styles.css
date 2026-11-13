@@ -58,6 +58,18 @@ svg { display: block; }
 }
 .logo-text { font-size: 11px; font-weight: 700; letter-spacing: .28em; margin-right: -.28em; margin-top: 6px; }
 .rail-icons { display: flex; flex-direction: column; gap: 10px; }
+.rail-bottom { margin-top: auto; }
+.rail-btn { position: relative; }
+.rail-btn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+/* Hover labels to the right of the bar */
+.rail-btn[data-tip]::after {
+  content: attr(data-tip); position: absolute; left: calc(100% + 12px); top: 50%; transform: translate(-4px, -50%);
+  white-space: pre; padding: 6px 10px; border-radius: 8px;
+  background: #121214; color: #fff; font-size: 12.5px; font-weight: 500;
+  box-shadow: 0 6px 18px rgba(0,0,0,.18);
+  opacity: 0; pointer-events: none; transition: opacity .12s, transform .12s; z-index: 20;
+}
+.rail-btn[data-tip]:hover::after, .rail-btn[data-tip]:focus-visible::after { opacity: 1; transform: translate(0, -50%); }
 .rail-btn {
   width: 52px; height: 52px; border-radius: 14px;
   display: grid; place-items: center;
@@ -70,7 +82,7 @@ svg { display: block; }
 
 /* ---------- Panel ---------- */
 .shell { --panel-w: 300px; }
-.rail { position: relative; z-index: 2; }
+.rail { position: relative; z-index: 5; overflow: visible; }
 .panel {
   width: var(--panel-w); flex: none;
   overflow-x: hidden; overflow-y: auto;
@@ -438,7 +450,9 @@ svg { display: block; }
   .toolbar { top: 66px; }
 }
 @media (max-width: 560px) {
-  .rail { display: none; }
+  .rail { width: 56px; }
+  .rail-btn { width: 40px; height: 40px; }
+  .logo-text { display: none; }
   .shell { --panel-w: 150px; }
   .panel-inner { padding: 18px 6px; }
   .panel-section-label,   .divider { display: none; }
@@ -469,3 +483,11 @@ svg { display: block; }
 .item.line.editing-line .lh { cursor: grabbing; }
 .item.link-target { box-shadow: 0 0 0 calc(3px * var(--iz, 1)) #121214, 0 8px 24px rgba(0,0,0,.12) !important; }
 .canvas.tool-line, .canvas.tool-line .item { cursor: crosshair; }
+
+/* ---------- Keyboard shortcuts sheet ---------- */
+.modal-wide { width: min(720px, calc(100vw - 32px)); }
+.sc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 18px 24px; }
+.sc-grid h3 { margin: 0 0 8px; font-size: 12px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.sc-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; font-size: 13.5px; border-bottom: 1px solid var(--line); }
+.sc-row:last-child { border-bottom: 0; }
+.sc-row kbd { font: 600 12px var(--font); color: var(--text); background: #f1f2f4; border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; white-space: nowrap; }

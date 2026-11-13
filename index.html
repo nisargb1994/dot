@@ -15,10 +15,12 @@
         <span class="logo-text">DOT</span>
       </div>
       <div class="rail-icons">
-        <button class="rail-btn" title="Home" data-icon="home"></button>
-        <button class="rail-btn active" title="Canvas" data-icon="target"></button>
-        <button class="rail-btn" title="Library" data-icon="library"></button>
-        <button class="rail-btn" title="Settings" data-icon="settings"></button>
+        <button class="rail-btn active" id="railProjects" data-icon="projects" data-tip="Projects  ⌘\" aria-label="Show or hide projects" aria-pressed="true"></button>
+        <button class="rail-btn" id="railAddProject" data-icon="addProject" data-tip="New project" aria-label="New project"></button>
+        <button class="rail-btn" id="railAddFolder" data-icon="newFolder" data-tip="New folder" aria-label="New folder"></button>
+      </div>
+      <div class="rail-icons rail-bottom">
+        <button class="rail-btn" id="railShortcuts" data-icon="keyboard" data-tip="Keyboard shortcuts  ?" aria-label="Keyboard shortcuts"></button>
       </div>
     </nav>
 
@@ -27,7 +29,6 @@
       <div class="panel-inner">
         <div class="panel-head">
           <h1 class="panel-title">Projects</h1>
-          <button class="icon-btn" id="collapsePanel" data-icon="sidebar" title="Hide sidebar (⌘\)" aria-label="Hide sidebar" aria-expanded="true"></button>
         </div>
         <div class="project-list" id="projectList"></div>
         <div class="add-rows">
@@ -50,7 +51,6 @@
       </div>
 
       <div class="topbar">
-        <button class="expand-btn" id="expandPanel" data-icon="sidebar" title="Show sidebar (⌘\)" aria-label="Show sidebar"></button>
         <div class="crumb"><span class="crumb-folder" id="crumbFolder" hidden></span><span class="crumb-name" id="crumbName">—</span><span class="crumb-count" id="crumbCount"></span></div>
       </div>
 

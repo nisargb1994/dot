@@ -11,7 +11,7 @@ An infinite dotted canvas for projects. Projects on the left; on the right, an i
 - Shift-drag snaps to the dots. Option/Alt-drag duplicates. Drag a corner to resize; drag the round handle to rotate (Shift for 15° steps).
 - Arrows: press **A** (or right-click → Add Line) and drag. Drop an end on an image, video or text to attach it — it follows the item when moved, resized or rotated. Drag the middle dot to curve; right-click for arrowheads, Straighten or Detach.
 - Group projects into folders: **+ Add Folder**, then drag projects onto it (or right-click a project → Move to folder).
-- Hide the sidebar with the panel button or ⌘\.
+- The black bar on the left shows/hides your projects (⌘\), creates projects and folders, and lists keyboard shortcuts (?).
 - ⌘C / ⌘V / ⌘X / ⌘D copy, paste, cut and duplicate. Press L to jump back to the last thing you edited.
 
 Everything is saved in your own browser (IndexedDB); nothing is uploaded.

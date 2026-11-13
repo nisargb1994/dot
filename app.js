@@ -59,6 +59,9 @@
     folder: svg('<path d="M3.5 7A2 2 0 0 1 5.5 5h4l2 2.2h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>'),
     newFolder: svg('<path d="M3.5 7A2 2 0 0 1 5.5 5h4l2 2.2h7a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 10.5v5M9.5 13h5"/>'),
     out: svg('<path d="M14 5h4.5A1.5 1.5 0 0 1 20 6.5v11a1.5 1.5 0 0 1-1.5 1.5H14M10 16l-4-4 4-4M6 12h10"/>'),
+    projects: svg('<rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/>'),
+    addProject: svg('<rect x="3.5" y="3.5" width="17" height="17" rx="4"/><path d="M12 8.5v7M8.5 12h7"/>'),
+    keyboard: svg('<rect x="2.5" y="6" width="19" height="12" rx="3"/><path d="M6.5 10h.01M10 10h.01M14 10h.01M17.5 10h.01M8 14h8"/>', 2),
     sidebar: svg('<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/>'),
     newProject: svg('<path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>'),
   };
@@ -496,7 +499,8 @@
     let last = rect().left;
     if (!animate) shell.classList.add('no-anim');
     shell.classList.toggle('collapsed', v);
-    $('#collapsePanel').setAttribute('aria-expanded', String(!v));
+    $('#railProjects').classList.toggle('active', !v);
+    $('#railProjects').setAttribute('aria-pressed', String(!v));
     if (!animate) { void shell.offsetWidth; shell.classList.remove('no-anim'); return; }
     // Keep the canvas content still on screen while the sidebar slides.
     const t0 = performance.now();
@@ -1367,6 +1371,21 @@
     });
   }
 
+  /* ---------------- Keyboard shortcuts sheet ---------------- */
+  const SHORTCUTS = [
+    ['Tools', [['V', 'Select'], ['H  or hold Space', 'Pan'], ['A', 'Draw an arrow'], ['Esc', 'Clear selection']]],
+    ['Canvas', [['⌘ + scroll / pinch', 'Zoom'], ['+  −', 'Zoom in / out'], ['⇧0', 'Zoom to 100%'], ['⇧1', 'Fit everything'], ['L', 'Back to last edited'], ['⌘\\', 'Show / hide projects']]],
+    ['Items', [['⌘C  ⌘X  ⌘V', 'Copy, cut, paste'], ['⌘D', 'Duplicate'], ['⌥ + drag', 'Duplicate while dragging'], ['⇧ + drag', 'Snap to the dots'], ['⌘A', 'Select all'], ['⌫', 'Delete']]],
+  ];
+  function openShortcuts() {
+    const cols = SHORTCUTS.map(([title, rows]) => `<section><h3>${title}</h3>${rows.map(([k, d]) => `<div class="sc-row"><span>${d}</span><kbd>${k}</kbd></div>`).join('')}</section>`).join('');
+    modal.innerHTML = `<div class="modal modal-wide" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts"><h2>Keyboard shortcuts</h2><p class="sub">Right-click anywhere on the canvas for everything else.</p><div class="sc-grid">${cols}</div><div class="actions"><button type="button" class="btn primary" data-close>Done</button></div></div>`;
+    modal.hidden = false;
+    const done = modal.querySelector('[data-close]');
+    done.onclick = closeModal;
+    done.focus();
+  }
+
   /* ---------------- Add modal ---------------- */
   const modal = $('#modal');
   function closeModal() { modal.hidden = true; modal.innerHTML = ''; }
@@ -1524,8 +1543,11 @@
   $('#locate').onclick = goToLastEdited;
   $('#addProject').onclick = () => addProject();
   $('#addFolder').onclick = () => addFolder();
-  $('#collapsePanel').onclick = togglePanel;
-  $('#expandPanel').onclick = togglePanel;
+  $('#railProjects').onclick = togglePanel;
+  // New project / folder from the bar: open the panel first so the name can be typed in place.
+  $('#railAddProject').onclick = () => { setCollapsed(false); addProject(); };
+  $('#railAddFolder').onclick = () => { setCollapsed(false); addFolder(); };
+  $('#railShortcuts').onclick = openShortcuts;
 
   const typing = t => t.closest?.('input, textarea') || t.isContentEditable;
   document.addEventListener('keydown', e => {
@@ -1548,6 +1570,7 @@
     else if (e.key === 'v' || e.key === 'V') setTool('select');
     else if (e.key === 'h' || e.key === 'H') setTool('hand');
     else if (e.key === 'a' || e.key === 'A') setTool('line');
+    else if (e.key === '?') openShortcuts();
     else if (e.key === 'l' || e.key === 'L') goToLastEdited();
   });
   addEventListener('blur', () => canvas.classList.remove('alt'));
