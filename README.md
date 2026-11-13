@@ -10,6 +10,7 @@ An infinite dotted canvas for projects. Projects on the left; on the right, an i
 - Hold Space and drag (or use the Hand tool) to pan; ⌘/Ctrl + scroll or pinch to zoom.
 - Shift-drag snaps to the dots. Option/Alt-drag duplicates. Drag the bottom-right handle to resize and the top-right handle to rotate (Shift for 15° steps).
 - Arrows: press **A** (or right-click → Add Line) and drag. Drop an end on an image, video or text to attach it — it follows the item when moved, resized or rotated. Drag the middle dot to curve; right-click for arrowheads, Straighten or Detach.
+- Right-click text → **Text style**: black text, white text, or Instagram-style black or white background that hugs each line.
 - Group projects into folders: **+ Add Folder**, then drag projects onto it (or right-click a project → Move to folder).
 - The black bar on the left shows/hides your projects (⌘\), creates projects and folders, and lists keyboard shortcuts (?).
 - ⌘Z / ⇧⌘Z undo and redo. ⌘C / ⌘V / ⌘X / ⌘D copy, paste, cut and duplicate. Press L to jump back to the last thing you edited.

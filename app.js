@@ -12,6 +12,17 @@
     subheading: { w: 440, label: 'Subheading', ph: 'Subheading' },
     paragraph:  { w: 380, label: 'Paragraph',  ph: 'Write something…' },
   };
+  // Text styles: plain black or white text, or Instagram-style text on a black or white highlight.
+  const TEXT_STYLES = {
+    'dark':     { label: 'Black text',       bg: 'none',    fg: '#121214', ring: '#c9cbd0', dash: true },
+    'light':    { label: 'White text',       bg: '#8b8e95', fg: '#ffffff' },
+    'dark-bg':  { label: 'Black background', bg: '#121214', fg: '#ffffff' },
+    'light-bg': { label: 'White background', bg: '#ffffff', fg: '#121214', ring: '#c9cbd0' },
+  };
+  const swatch = st => `<svg viewBox="0 0 24 24"><rect x="2.5" y="3.5" width="19" height="17" rx="5" fill="${st.bg}" stroke="${st.ring || st.bg}"${st.dash ? ' stroke-dasharray="2.5 2"' : ''}/><text x="12" y="16.2" text-anchor="middle" font-size="10.5" font-weight="700" fill="${st.fg}" font-family="-apple-system, Helvetica, Arial, sans-serif">Aa</text></svg>`;
+  let lastTextStyle = 'dark';
+  try { lastTextStyle = localStorage.getItem('dot.textStyle') || 'dark'; } catch {}
+  if (!TEXT_STYLES[lastTextStyle]) lastTextStyle = 'dark';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
   const EMBEDDED = (() => { try { return window.self !== window.top; } catch { return true; } })();
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -731,7 +742,7 @@
     }
 
     if (it.kind === 'text') {
-      el.className = `item text t-${it.variant}`;
+      el.className = `item text t-${it.variant} ts-${it.tstyle || 'dark'}`;
       const t = document.createElement('div');
       t.className = 'txt';
       t.dataset.ph = TEXT[it.variant].ph;
@@ -1162,6 +1173,25 @@
     el.addEventListener('pointercancel', up);
   }
 
+  function setTextStyle(style) {
+    const texts = selectedItems().filter(i => i.kind === 'text');
+    if (!texts.length) return;
+    record();
+    for (const it of texts) {
+      it.tstyle = style;
+      const el = elOf(it.id);
+      if (el) {
+        el.classList.remove(...Object.keys(TEXT_STYLES).map(k => `ts-${k}`));
+        el.classList.add(`ts-${style}`);
+        place(el, it);                                   // the box height can change, so re-aim attached arrows
+      }
+      db.put('items', it);
+      touch(it.id);
+    }
+    lastTextStyle = style;
+    try { localStorage.setItem('dot.textStyle', style); } catch {}
+  }
+
   function rotateSelected(deg, absolute = false) {
     record();
     for (const it of selectedItems().filter(i => i.kind !== 'line')) {
@@ -1378,9 +1408,23 @@
   function closeCtx() { ctx.hidden = true; }
   document.addEventListener('pointerdown', e => { if (!ctx.hidden && !ctx.contains(e.target)) closeCtx(); }, true);
 
+  const textStyleEntries = () => {
+    const texts = selectedItems().filter(i => i.kind === 'text');
+    if (!texts.length) return [];
+    const current = new Set(texts.map(i => i.tstyle || 'dark'));
+    return [
+      { heading: 'Text style' },
+      ...Object.entries(TEXT_STYLES).map(([key, st]) => ({
+        label: st.label, icon: swatch(st), hint: current.size === 1 && current.has(key) ? '✓' : '',
+        action: () => setTextStyle(key),
+      })),
+      'sep',
+    ];
+  };
   const selectionEntries = () => {
     const n = state.sel.size;
     return [
+      ...textStyleEntries(),
       { label: 'Duplicate', icon: I.duplicate, hint: '⌘D', action: duplicate },
       { label: 'Copy', icon: I.copy, hint: '⌘C', action: () => copySelection() },
       { label: 'Cut', icon: I.cut, hint: '⌘X', action: () => { if (copySelection(true)) { toast(`Cut ${plural(clipboard.length, 'item')} — ⌘V to paste`); removeSelected(); } } },
@@ -1410,7 +1454,7 @@
             ...(it.bend.d ? [{ label: 'Straighten', icon: I.straight, action: () => updateLine(it, l => { l.bend = { t: 0.5, d: 0 }; }) }] : []),
             ...(it.a.attach || it.b.attach ? [{ label: 'Detach ends', icon: I.unlink, action: () => updateLine(it, l => { delete l.a.attach; delete l.b.attach; }) }] : []),
           ]
-        : it.kind === 'text' ? [{ label: 'Edit text', icon: I.edit, action: () => startEdit(it, el) }]
+        : it.kind === 'text' ? [{ label: 'Edit text', icon: I.edit, action: () => startEdit(it, el) }, 'sep']
         : [{ label: 'Open', icon: I.open, action: () => openLightbox(it) }];
       openCtx(e.clientX, e.clientY, [...first, ...selectionEntries()]);
       return;
@@ -1436,7 +1480,7 @@
       { heading: 'Add text' },
       ...Object.entries(TEXT).map(([variant, t]) => ({
         label: t.label, icon: I[variant],
-        action: async () => { const { it, el } = await addItem({ kind: 'text', variant, text: '' }, at); startEdit(it, el, true); },
+        action: async () => { const { it, el } = await addItem({ kind: 'text', variant, text: '', tstyle: lastTextStyle }, at); startEdit(it, el, true); },
       })),
     ]);
   });
