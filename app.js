@@ -55,6 +55,8 @@
   try { lastTextStyle = localStorage.getItem('dot.textStyle') || 'dark'; } catch {}
   if (!TEXT_STYLES[lastTextStyle]) lastTextStyle = 'dark';
   const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  // Sharing: projects are uploaded to a public Supabase Storage bucket ("shares") and opened from #s=<id> links.
+  const SHARE = { url: 'https://ytqlmagatpcaqxvfqodz.supabase.co', key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inl0cWxtYWdhdHBjYXF4dmZxb2R6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODEyNzAxNzEsImV4cCI6MjA5Njg0NjE3MX0.e6QKRe06LAiDpGFyEuC6l-3zztxLycEKcD9U2apMR1A', bucket: 'dot-shares' };
   const EMBEDDED = (() => { try { return window.self !== window.top; } catch { return true; } })();
   const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
   const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
@@ -116,6 +118,7 @@
     rect: svg('<rect x="3" y="7" width="18" height="10" rx="1.5"/>'),
     triangle: svg('<path d="M12 4.5 20.5 19h-17z"/>'),
     circle: svg('<circle cx="12" cy="12" r="7.5"/>'),
+    share: svg('<path d="M12 15V3.5M7.5 8 12 3.5 16.5 8"/><path d="M5 12.5v6A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-6"/>'),
     newProject: svg('<path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>'),
   };
   document.querySelectorAll('[data-icon]').forEach(el => { el.innerHTML = I[el.dataset.icon] || ''; });
@@ -363,6 +366,7 @@
       e.preventDefault();
       const targets = state.folders.filter(f => f.id !== p.folderId);
       openCtx(e.clientX, e.clientY, [
+        { label: 'Share project', icon: I.share, action: () => shareProject(p.id) },
         { label: 'Rename', icon: I.edit, action: () => startRename('project', p.id) },
         'sep',
         ...(targets.length ? [{ heading: 'Move to folder' }, ...targets.map(f => ({ label: f.name, icon: I.folder, action: () => moveProject(p.id, f.id) }))] : []),
@@ -566,6 +570,113 @@
     requestAnimationFrame(tick);
   }
   const togglePanel = () => setCollapsed(!shell.classList.contains('collapsed'));
+
+  /* ---------------- Share a project as a link ---------------- */
+  // A share is a frozen copy: project.json plus one file per uploaded image/video, under shares/<id>/.
+  // Whoever opens the link gets their own copy of the project; nobody can change the original share.
+  const shareOn = () => !!(SHARE.url && SHARE.key);
+  const shareBase = () => SHARE.url.replace(/\/+$/, '') + '/storage/v1/object';
+  const shareLink = id => location.origin + location.pathname + '#s=' + id;
+  const shareId = () => { const a = crypto.getRandomValues(new Uint8Array(12)); return [...a].map(b => 'abcdefghijkmnpqrstuvwxyz23456789'[b % 32]).join(''); };
+  async function shareUpload(path, body, type) {
+    const r = await fetch(`${shareBase()}/${SHARE.bucket}/${path}`, {
+      method: 'POST',
+      headers: { apikey: SHARE.key, Authorization: `Bearer ${SHARE.key}`, 'Content-Type': type || 'application/octet-stream', 'x-upsert': 'false' },
+      body,
+    });
+    if (!r.ok) throw new Error(`Upload failed (${r.status}) ${await r.text().catch(() => '')}`.trim());
+  }
+  function shareModal(title, sub) {
+    modal.innerHTML = `<div class="modal" role="dialog" aria-modal="true"><h2></h2><p class="sub"></p><div class="share-body"></div><div class="actions"><button type="button" class="btn ghost" data-close>Close</button></div></div>`;
+    modal.querySelector('h2').textContent = title;
+    modal.querySelector('.sub').textContent = sub;
+    modal.querySelector('[data-close]').onclick = closeModal;
+    modal.hidden = false;
+    return modal.querySelector('.share-body');
+  }
+
+  async function shareProject(pid) {
+    const p = state.projects.find(x => x.id === pid);
+    if (!p) return;
+    if (!shareOn()) return toast("Sharing isn't set up yet");
+    endEdit?.();
+    const its = state.items.filter(i => i.projectId === pid);
+    const body = shareModal(`Share “${p.name}”`, 'Anyone with the link can open a copy of this project. Changes you make later aren’t included. Share again to send an update.');
+    body.innerHTML = '<div class="share-status">Uploading…</div>';
+    const status = body.firstChild;
+    const id = shareId();
+    try {
+      const files = its.filter(i => i.blob);
+      let done = 0;
+      const out = [];
+      for (const it of its) {
+        const { blob, projectId, ...rest } = it;
+        if (blob) {
+          status.textContent = `Uploading files… ${++done} of ${files.length}`;
+          await shareUpload(`${id}/${it.id}`, blob, blob.type);
+          rest.file = { path: it.id, type: blob.type, name: blob.name || it.name || '' };
+        }
+        out.push(rest);
+      }
+      status.textContent = 'Creating link…';
+      const p0 = project()?.id === pid ? view : p.view;
+      const manifest = { v: 1, name: p.name, view: p0 || null, sharedAt: Date.now(), items: out };
+      await shareUpload(`${id}/project.json`, JSON.stringify(manifest), 'application/json');
+      const link = shareLink(id);
+      body.innerHTML = `<div class="share-link"><input class="field" readonly aria-label="Share link"><button type="button" class="btn primary">Copy link</button></div>`;
+      const input = body.querySelector('input'), copy = body.querySelector('button');
+      input.value = link;
+      input.onclick = () => input.select();
+      copy.onclick = async () => {
+        try { await navigator.clipboard.writeText(link); } catch { input.select(); document.execCommand('copy'); }
+        copy.textContent = 'Copied';
+        setTimeout(() => { copy.textContent = 'Copy link'; }, 1600);
+      };
+      copy.focus();
+    } catch (err) {
+      body.innerHTML = '<div class="err"></div>';
+      body.firstChild.textContent = `Couldn't create the link. ${err.message || err}`;
+    }
+  }
+
+  // Open a #s=<id> link: download the share and add it as a new project (once per share).
+  async function openSharedFromHash() {
+    const id = (location.hash.match(/^#s=([a-z0-9]{6,40})$/) || [])[1];
+    if (!id) return false;
+    history.replaceState(null, '', location.pathname + location.search);
+    const existing = state.projects.find(p => p.sharedFrom === id);
+    if (existing) { openProject(existing.id); toast(`Opened “${existing.name}”`); return true; }
+    if (!shareOn()) { toast("Sharing isn't set up on this copy of DOT"); return false; }
+    toast('Opening shared project…');
+    try {
+      const pub = `${shareBase()}/public/${SHARE.bucket}/${id}`;
+      const r = await fetch(`${pub}/project.json`);
+      if (!r.ok) throw new Error(r.status === 400 || r.status === 404 ? 'This link doesn’t exist or has been removed.' : `Download failed (${r.status}).`);
+      const m = await r.json();
+      const srcs = [];
+      for (const it of m.items || []) {
+        const { file, ...rest } = it;
+        if (file) {
+          const fr = await fetch(`${pub}/${file.path}`);
+          if (!fr.ok) continue;
+          const b = await fr.blob();
+          rest.blob = new File([b], file.name || 'file', { type: file.type || b.type });
+        }
+        srcs.push(normalize(rest));
+      }
+      const p = { id: uid(), name: m.name || 'Shared project', createdAt: Date.now(), view: m.view || null, lastEdited: null, folderId: null, sharedFrom: id };
+      state.projects.push(p);
+      await db.put('projects', p);
+      copyItemsTo(srcs, p.id);                         // fresh ids; arrows stay attached to the copied items
+      openProject(p.id);
+      toast(`Added “${p.name}” to your projects`);
+      return true;
+    } catch (err) {
+      toast(`Couldn't open the shared project. ${err.message || ''}`.trim());
+      return false;
+    }
+  }
+  addEventListener('hashchange', openSharedFromHash);
 
   async function projectFromSelection() {
     const src = [...state.sel].map(itemById).filter(Boolean);
@@ -2025,9 +2136,10 @@
     state.items.forEach(normalize);
     state.projects.sort((a, b) => a.createdAt - b.createdAt);
     setTool('select');
-    if (!state.projects.length) return seedWelcome();
+    if (!state.projects.length) return (await openSharedFromHash()) || seedWelcome();   // first visit via a share link: just that project
     let last = null;
     try { last = localStorage.getItem('dot.current'); } catch {}
     openProject(state.projects.some(p => p.id === last) ? last : state.projects[0].id);
+    openSharedFromHash();
   })();
 })();
