@@ -20,6 +20,37 @@
     'light-bg': { label: 'White background', bg: '#ffffff', fg: '#121214', ring: '#c9cbd0' },
   };
   const swatch = st => `<svg viewBox="0 0 24 24"><rect x="2.5" y="3.5" width="19" height="17" rx="5" fill="${st.bg}" stroke="${st.ring || st.bg}"${st.dash ? ' stroke-dasharray="2.5 2"' : ''}/><text x="12" y="16.2" text-anchor="middle" font-size="10.5" font-weight="700" fill="${st.fg}" font-family="-apple-system, Helvetica, Arial, sans-serif">Aa</text></svg>`;
+  const ALIGNS = ['left', 'center', 'right'];
+  // Shapes: square and circle keep 1:1 when resized; rectangle and triangle stretch freely.
+  const SHAPES = {
+    square:   { label: 'Square',    w: 200, h: 200, lock: true },
+    rect:     { label: 'Rectangle', w: 280, h: 180 },
+    triangle: { label: 'Triangle',  w: 220, h: 190 },
+    circle:   { label: 'Circle',    w: 200, h: 200, lock: true },
+  };
+  const SHAPE_FILLS = {
+    grey:    { label: 'Grey',    fill: '#dfe1e6', stroke: 'none' },
+    black:   { label: 'Black',   fill: '#121214', stroke: 'none' },
+    white:   { label: 'White',   fill: '#ffffff', stroke: '#c9cbd0' },
+    outline: { label: 'Outline', fill: 'none',    stroke: '#121214' },
+  };
+  const shapeSvg = (shape, f, cls = '') => {
+    const st = `fill="${f.fill}" stroke="${f.stroke}" stroke-width="2" vector-effect="non-scaling-stroke"`;
+    const body = shape === 'circle' ? `<ellipse cx="50" cy="50" rx="49.5" ry="49.5" ${st}/>`
+      : shape === 'triangle' ? `<polygon points="50,0.5 99.5,99.5 0.5,99.5" stroke-linejoin="round" ${st}/>`
+      : `<rect x="0.5" y="0.5" width="99" height="99" ${st}/>`;
+    return `<svg class="${cls}" viewBox="0 0 100 100" preserveAspectRatio="none">${body}</svg>`;
+  };
+  const fillSwatch = f => `<svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="5" fill="${f.fill}" stroke="${f.stroke === 'none' ? f.fill : f.stroke}" stroke-width="1.5"/></svg>`;
+  // Instagram posts and reels show as the official embed, scaled to the card.
+  const IG_W = 400;
+  const igCode = url => {
+    try {
+      const u = new URL(url);
+      if (!/(^|\.)instagram\.com$/.test(u.hostname)) return null;
+      return (u.pathname.match(/\/(?:p|reels?|tv)\/([A-Za-z0-9_-]+)/) || [])[1] || null;
+    } catch { return null; }
+  };
   let lastTextStyle = 'dark';
   try { lastTextStyle = localStorage.getItem('dot.textStyle') || 'dark'; } catch {}
   if (!TEXT_STYLES[lastTextStyle]) lastTextStyle = 'dark';
@@ -77,6 +108,14 @@
     undo: svg('<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>'),
     redo: svg('<path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/>'),
     sidebar: svg('<rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.5 4.5v15"/>'),
+    alignLeft: svg('<path d="M4 6h16M4 10.5h10M4 15h16M4 19.5h10"/>'),
+    alignCenter: svg('<path d="M4 6h16M7 10.5h10M4 15h16M7 19.5h10"/>'),
+    alignRight: svg('<path d="M4 6h16M10 10.5h10M4 15h16M10 19.5h10"/>'),
+    shapes: svg('<rect x="3.5" y="11.5" width="9" height="9" rx="1.5"/><circle cx="16.5" cy="7.5" r="4"/>'),
+    square: svg('<rect x="5" y="5" width="14" height="14" rx="1.5"/>'),
+    rect: svg('<rect x="3" y="7" width="18" height="10" rx="1.5"/>'),
+    triangle: svg('<path d="M12 4.5 20.5 19h-17z"/>'),
+    circle: svg('<circle cx="12" cy="12" r="7.5"/>'),
     newProject: svg('<path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>'),
   };
   document.querySelectorAll('[data-icon]').forEach(el => { el.innerHTML = I[el.dataset.icon] || ''; });
@@ -622,7 +661,44 @@
     if (it.kind !== 'text') el.style.height = it.h + 'px';
     el.style.zIndex = it.z || 0;
     el.style.transform = it.rot ? `rotate(${it.rot}deg)` : '';
+    const ig = el.querySelector('iframe.ig');
+    if (ig) { ig.style.transform = `scale(${it.w / IG_W})`; ig.style.height = Math.round(it.h * IG_W / it.w) + 'px'; }
     refreshLinesFor(it.id);
+    if (state.sel.has(it.id)) queueGroupBox();
+  }
+
+  /* ---------------- Group box: scale several selected items from one corner ---------------- */
+  // Axis-aligned world box around an item, rotation included.
+  function aabb(it) {
+    const b = bounds(it);
+    if (it.kind === 'line' || !it.rot) return b;
+    const th = it.rot * Math.PI / 180, c = Math.abs(Math.cos(th)), s = Math.abs(Math.sin(th));
+    const w = b.w * c + b.h * s, h = b.w * s + b.h * c;
+    return { x: b.x + b.w / 2 - w / 2, y: b.y + b.h / 2 - h / 2, w, h };
+  }
+  function groupAabb(its) {
+    const bx = its.map(aabb);
+    const x = Math.min(...bx.map(b => b.x)), y = Math.min(...bx.map(b => b.y));
+    return { x, y, w: Math.max(...bx.map(b => b.x + b.w)) - x, h: Math.max(...bx.map(b => b.y + b.h)) - y };
+  }
+  let groupQueued = false;
+  function queueGroupBox() {
+    if (groupQueued) return;
+    groupQueued = true;
+    requestAnimationFrame(() => { groupQueued = false; updateGroupBox(); });
+  }
+  function updateGroupBox() {
+    let gb = world.querySelector('.group-box');
+    const its = selectedItems();
+    if (its.length < 2) { gb?.remove(); return; }
+    if (!gb) {
+      gb = document.createElement('div');
+      gb.className = 'group-box';
+      gb.innerHTML = `<div class="handle group-handle" title="Drag to scale the selection · Shift snaps to the dots">${I.resize}</div>`;
+      world.append(gb);
+    }
+    const G = groupAabb(its);
+    Object.assign(gb.style, { left: G.x + 'px', top: G.y + 'px', width: G.w + 'px', height: G.h + 'px' });
   }
 
   /* ---------------- Lines / arrows ---------------- */
@@ -747,11 +823,15 @@
       t.className = 'txt';
       t.dataset.ph = TEXT[it.variant].ph;
       t.textContent = it.text || '';
+      el.style.textAlign = it.align || 'left';
       t.addEventListener('keydown', ev => {
         ev.stopPropagation();
         if (ev.key === 'Escape' || (ev.key === 'Enter' && it.variant !== 'paragraph' && !ev.shiftKey)) { ev.preventDefault(); endEdit?.(); }
       });
       el.append(t);
+    } else if (it.kind === 'shape') {
+      el.className = 'item shape';
+      el.innerHTML = shapeSvg(it.shape, SHAPE_FILLS[it.fill] || SHAPE_FILLS.grey, 'shape-svg');
     } else {
       el.className = 'item card';
       el.title = it.name || '';
@@ -766,7 +846,16 @@
         return ph;
       };
 
-      if (it.kind === 'image') {
+      const ig = !it.blob && igCode(it.url);
+      if (ig) {
+        const fr = document.createElement('iframe');
+        fr.className = 'ig';
+        fr.title = 'Instagram post';
+        fr.setAttribute('scrolling', 'no');
+        fr.style.width = IG_W + 'px';
+        fr.src = `https://www.instagram.com/p/${ig}/embed/`;
+        media.append(fr);
+      } else if (it.kind === 'image') {
         const img = new Image();
         img.draggable = false;
         img.onload = () => setRatio(it, el, img.naturalWidth / img.naturalHeight);
@@ -801,7 +890,7 @@
       }
       const badge = document.createElement('div');
       badge.className = 'badge';
-      badge.textContent = it.kind === 'image' ? (it.blob ? 'Image' : 'Image link') : (it.blob ? 'Video' : 'Video link');
+      badge.textContent = ig ? 'Instagram' : it.kind === 'image' ? (it.blob ? 'Image' : 'Image link') : (it.blob ? 'Video' : 'Video link');
       el.append(media, badge);
     }
 
@@ -858,6 +947,7 @@
   function syncSel() {
     world.querySelectorAll('.item').forEach(el => el.classList.toggle('selected', state.sel.has(el.dataset.id)));
     world.classList.toggle('multi', state.sel.size > 1);
+    updateGroupBox();
   }
 
   function bringToFront(ids) {
@@ -971,6 +1061,7 @@
     }
     // A pasted link to an image or video
     if (isHttpUrl(text)) {
+      if (igCode(text)) { e.preventDefault(); return addItem({ kind: /\/(reels?|tv)\//.test(text) ? 'video' : 'image', url: text, name: text }, at); }
       const v = parseVideo(text);
       if (v && (v.provider === 'YouTube' || v.provider === 'Vimeo' || v.provider === 'file')) { e.preventDefault(); return addItem({ kind: 'video', url: text, name: text }, at); }
       if (/\.(png|jpe?g|gif|webp|avif|svg|bmp)(\?|#|$)/i.test(text)) { e.preventDefault(); return addItem({ kind: 'image', url: text, name: text }, at); }
@@ -1017,6 +1108,10 @@
 
   world.addEventListener('pointerdown', e => {
     if (e.target.isContentEditable) { e.stopPropagation(); return; }   // caret placement while editing text
+    if (e.target.closest('.group-handle') && e.button === 0 && !panning()) {
+      e.stopPropagation(); closeCtx(); endEdit?.();
+      return startGroupResize(e, e.target.closest('.group-handle'));
+    }
     const el = e.target.closest('.item');
     if (!el || e.button !== 0 || panning() || state.tool === 'line') return;   // hand/line tool: the canvas handles it
     e.stopPropagation();
@@ -1095,7 +1190,9 @@
   function startResize(e, el, it, corner) {
     const s = { x: e.clientX, y: e.clientY, w: it.w, h: contentH(it, el) };
     const once = recorder();
-    const ar = it.kind === 'text' ? null : it.w / it.h;
+    const free = it.kind === 'shape' && !SHAPES[it.shape]?.lock;   // rectangle / triangle stretch freely
+    const ar = it.kind === 'text' || free ? null : it.w / it.h;
+    const minW = it.kind === 'shape' ? 24 : MIN_W;
     const sx = corner.includes('w') ? -1 : 1, sy = corner.includes('n') ? -1 : 1;
     const th = (it.rot || 0) * Math.PI / 180, cos = Math.cos(th), sin = Math.sin(th);
     const R = (x, y) => ({ x: x * cos - y * sin, y: x * sin + y * cos });
@@ -1113,11 +1210,17 @@
         const wFromH = (s.h + sy * ly) * ar;
         if (Math.abs(wFromH - s.w) > Math.abs(w - s.w)) w = wFromH;
       }
-      if (ev.shiftKey) { const step = GRID / view.z; w = Math.round(w / step) * step; }
-      w = Math.max(MIN_W, Math.round(w));
+      const step = GRID / view.z;
+      if (ev.shiftKey) w = Math.round(w / step) * step;
+      w = Math.max(minW, Math.round(w));
       it.w = w;
       let h;
       if (ar) h = it.h = Math.round(w / ar);
+      else if (free) {
+        h = s.h + sy * ly;
+        if (ev.shiftKey) h = Math.round(h / step) * step;
+        h = it.h = Math.max(24, Math.round(h));
+      }
       else { el.style.width = w + 'px'; h = contentH(it, el); }
       const v = R(sx * w / 2, sy * h / 2);
       it.x = Math.round((anchor.x + v.x - w / 2) * 100) / 100;
@@ -1190,6 +1293,92 @@
     }
     lastTextStyle = style;
     try { localStorage.setItem('dot.textStyle', style); } catch {}
+  }
+
+  // Scale every selected item together from the group's bottom-right corner; the top-left stays put.
+  // Text keeps its fixed type size: its box widens or narrows and the words re-flow.
+  function startGroupResize(e, handle) {
+    const its = selectedItems();
+    if (its.length < 2) return;
+    const G = groupAabb(its), A = { x: G.x, y: G.y };
+    const snaps = its.map(it => it.kind === 'line'
+      ? { it, a: { ...it.a }, b: { ...it.b } }
+      : { it, x: it.x, y: it.y, w: it.w, h: it.kind === 'text' ? null : it.h });
+    const kMin = Math.max(0.05, ...snaps.filter(s => s.it.kind !== 'line').map(s => (s.it.kind === 'text' ? 60 : 24) / s.w));
+    const s0 = { x: e.clientX, y: e.clientY };
+    const once = recorder();
+    handle.setPointerCapture(e.pointerId);
+    world.classList.add('group-scaling');
+    const scale = (v, a, k) => Math.round((a + (v - a) * k) * 100) / 100;
+    const move = ev => {
+      once();
+      const dX = (ev.clientX - s0.x) / view.z, dY = (ev.clientY - s0.y) / view.z;
+      const kx = (G.w + dX) / G.w, ky = (G.h + dY) / G.h;
+      let k = Math.abs(kx - 1) > Math.abs(ky - 1) ? kx : ky;
+      if (ev.shiftKey) { const step = GRID / view.z; k = Math.max(step, Math.round(G.w * k / step) * step) / G.w; }
+      k = Math.max(kMin, k);
+      for (const sn of snaps) {
+        const it = sn.it;
+        if (it.kind === 'line') {
+          for (const end of ['a', 'b']) if (!it[end].attach) { it[end].x = scale(sn[end].x, A.x, k); it[end].y = scale(sn[end].y, A.y, k); }
+        } else if (it.kind === 'text') {
+          it.w = Math.round(sn.w * k);
+          it.x = scale(sn.x, A.x, k); it.y = scale(sn.y, A.y, k);
+        } else {                                           // scale about the centre so rotated items stay in place
+          const cx = scale(sn.x + sn.w / 2, A.x, k), cy = scale(sn.y + sn.h / 2, A.y, k);
+          it.w = Math.round(sn.w * k); it.h = Math.round(sn.h * k);
+          it.x = Math.round((cx - it.w / 2) * 100) / 100; it.y = Math.round((cy - it.h / 2) * 100) / 100;
+        }
+        const el = elOf(it.id);
+        if (el) place(el, it);
+      }
+      queueGroupBox();
+    };
+    const up = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', up);
+      world.classList.remove('group-scaling');
+      its.forEach(it => db.put('items', it));
+      touch(its[its.length - 1].id);
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', up);
+  }
+
+  // Change a property on every selected item of one kind, as one undo step.
+  function updateSelected(kind, change) {
+    const its = selectedItems().filter(i => i.kind === kind);
+    if (!its.length) return;
+    record();
+    for (const it of its) {
+      change(it);
+      const old = elOf(it.id);
+      if (old) {
+        const el = itemEl(it);
+        if (state.sel.has(it.id)) el.classList.add('selected');
+        old.replaceWith(el);
+        place(el, it);                                     // text height can change: re-aim attached arrows
+      }
+      db.put('items', it);
+      touch(it.id);
+    }
+  }
+  const setTextVariant = v => updateSelected('text', it => { it.variant = v; });
+  const setTextAlign = a => updateSelected('text', it => { it.align = a; });
+  const setShapeFill = f => { updateSelected('shape', it => { it.fill = f; }); lastShapeFill = f; try { localStorage.setItem('dot.shapeFill', f); } catch {} };
+  let lastShapeFill = 'grey';
+  try { lastShapeFill = localStorage.getItem('dot.shapeFill') || 'grey'; } catch {}
+  if (!SHAPE_FILLS[lastShapeFill]) lastShapeFill = 'grey';
+
+  function addShape(shape, at = viewCenter()) {
+    const S = SHAPES[shape];
+    // Repeated adds at the same spot cascade so new shapes don't hide each other.
+    const taken = p => itemsHere().some(i => i.kind === 'shape' && Math.abs(i.x + i.w / 2 - p.x) < 2 && Math.abs(i.y + i.h / 2 - p.y) < 2);
+    let p = { ...at };
+    for (let n = 0; n < 30 && taken(p); n++) p = { x: p.x + GRID / view.z, y: p.y + GRID / view.z };
+    addItem({ kind: 'shape', shape, fill: lastShapeFill, w: S.w, h: S.h, ar: S.w / S.h }, p);
   }
 
   function rotateSelected(deg, absolute = false) {
@@ -1384,7 +1573,45 @@
     canvas.classList.toggle('tool-hand', panning());
     canvas.classList.toggle('tool-line', t === 'line');
   }
-  document.querySelectorAll('[data-tool]').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+  document.querySelectorAll('[data-tool]').forEach(b => b.addEventListener('click', () => { closeShapes(); setTool(b.dataset.tool); }));
+
+  // Shapes: a small flyout beside the toolbar; the shape lands in the middle of the view.
+  const shapesBtn = $('#shapesBtn'), shapePop = $('#shapePop');
+  shapePop.innerHTML = Object.entries(SHAPES).map(([k, S]) => `<button class="sp-item" data-shape="${k}" title="Add ${S.label.toLowerCase()}">${I[k]}<span>${S.label}</span></button>`).join('');
+  function closeShapes() { shapePop.hidden = true; shapesBtn.classList.remove('open'); shapesBtn.setAttribute('aria-expanded', 'false'); }
+  shapesBtn.addEventListener('click', () => {
+    const open = shapePop.hidden;
+    shapePop.hidden = !open;
+    if (open) {                                          // line the flyout up with the button
+      const r = shapesBtn.getBoundingClientRect(), sr = stage.getBoundingClientRect();
+      shapePop.style.left = r.right - sr.left + 10 + 'px';
+      shapePop.style.top = Math.min(r.top - sr.top - 6, sr.height - shapePop.offsetHeight - 12) + 'px';
+    }
+    shapesBtn.classList.toggle('open', open);
+    shapesBtn.setAttribute('aria-expanded', String(open));
+  });
+  shapePop.addEventListener('click', e => {
+    const b = e.target.closest('[data-shape]');
+    if (!b) return;
+    closeShapes();
+    setTool('select');
+    addShape(b.dataset.shape);
+  });
+  document.addEventListener('pointerdown', e => { if (!shapePop.hidden && !e.target.closest('#shapePop, #shapesBtn')) closeShapes(); }, true);
+
+  // Instagram embeds report their height; size the card to match the post.
+  addEventListener('message', e => {
+    if (!/^https:\/\/(www\.)?instagram\.com$/.test(e.origin)) return;
+    let d = e.data;
+    try { if (typeof d === 'string') d = JSON.parse(d); } catch { return; }
+    const h = d && d.type === 'MEASURE' && d.details && +d.details.height;
+    if (!h) return;
+    for (const fr of document.querySelectorAll('iframe.ig')) {
+      if (fr.contentWindow !== e.source) continue;
+      const el = fr.closest('.item'), it = el && itemById(el.dataset.id);
+      if (it) setRatio(it, el, IG_W / h);
+    }
+  });
 
   /* ---------------- Context menu ---------------- */
   const ctx = $('#ctx');
@@ -1393,6 +1620,24 @@
     for (const en of entries) {
       if (en === 'sep') { ctx.insertAdjacentHTML('beforeend', '<div class="ctx-sep"></div>'); continue; }
       if (en.heading) { const h = document.createElement('div'); h.className = 'ctx-label'; h.textContent = en.heading; ctx.append(h); continue; }
+      if (en.row) {                                      // a compact row of icon choices, e.g. text alignment
+        const r = document.createElement('div');
+        r.className = 'ctx-row';
+        r.innerHTML = '<span class="ctx-row-label"></span>';
+        r.firstChild.textContent = en.label;
+        for (const c of en.row) {
+          const b = document.createElement('button');
+          b.className = 'ctx-chip' + (c.active ? ' active' : '');
+          b.title = c.title;
+          b.setAttribute('aria-label', c.title);
+          b.setAttribute('aria-pressed', String(!!c.active));
+          b.innerHTML = c.icon;
+          b.addEventListener('click', () => { closeCtx(); c.action(); });
+          r.append(b);
+        }
+        ctx.append(r);
+        continue;
+      }
       const b = document.createElement('button');
       b.className = 'ctx-item' + (en.danger ? ' danger' : '');
       b.innerHTML = `${en.icon || ''}<span></span>${en.hint ? `<kbd class="ctx-hint">${en.hint}</kbd>` : ''}`;
@@ -1412,7 +1657,11 @@
     const texts = selectedItems().filter(i => i.kind === 'text');
     if (!texts.length) return [];
     const current = new Set(texts.map(i => i.tstyle || 'dark'));
+    const only = (key, v) => { const s = new Set(texts.map(i => i[key] || (key === 'align' ? 'left' : ''))); return s.size === 1 && s.has(v); };
     return [
+      { label: 'Type', row: Object.entries(TEXT).map(([v, t]) => ({ title: t.label, icon: I[v], active: only('variant', v), action: () => setTextVariant(v) })) },
+      { label: 'Align', row: ALIGNS.map(a => ({ title: `Align ${a}`, icon: I['align' + a[0].toUpperCase() + a.slice(1)], active: only('align', a), action: () => setTextAlign(a) })) },
+      'sep',
       { heading: 'Text style' },
       ...Object.entries(TEXT_STYLES).map(([key, st]) => ({
         label: st.label, icon: swatch(st), hint: current.size === 1 && current.has(key) ? '✓' : '',
@@ -1423,8 +1672,11 @@
   };
   const selectionEntries = () => {
     const n = state.sel.size;
+    const shapes = selectedItems().filter(i => i.kind === 'shape');
+    const fills = new Set(shapes.map(i => i.fill || 'grey'));
     return [
       ...textStyleEntries(),
+      ...(shapes.length ? [{ label: 'Colour', row: Object.entries(SHAPE_FILLS).map(([k, f]) => ({ title: f.label, icon: fillSwatch(f), active: fills.size === 1 && fills.has(k), action: () => setShapeFill(k) })) }, 'sep'] : []),
       { label: 'Duplicate', icon: I.duplicate, hint: '⌘D', action: duplicate },
       { label: 'Copy', icon: I.copy, hint: '⌘C', action: () => copySelection() },
       { label: 'Cut', icon: I.cut, hint: '⌘X', action: () => { if (copySelection(true)) { toast(`Cut ${plural(clipboard.length, 'item')} — ⌘V to paste`); removeSelected(); } } },
@@ -1454,7 +1706,8 @@
             ...(it.bend.d ? [{ label: 'Straighten', icon: I.straight, action: () => updateLine(it, l => { l.bend = { t: 0.5, d: 0 }; }) }] : []),
             ...(it.a.attach || it.b.attach ? [{ label: 'Detach ends', icon: I.unlink, action: () => updateLine(it, l => { delete l.a.attach; delete l.b.attach; }) }] : []),
           ]
-        : it.kind === 'text' ? [{ label: 'Edit text', icon: I.edit, action: () => startEdit(it, el) }, 'sep']
+        : it.kind === 'text' ? [{ label: 'Edit text', icon: I.edit, hint: '↵', action: () => startEdit(it, el) }, 'sep']
+        : it.kind === 'shape' ? []
         : [{ label: 'Open', icon: I.open, action: () => openLightbox(it) }];
       openCtx(e.clientX, e.clientY, [...first, ...selectionEntries()]);
       return;
@@ -1476,6 +1729,7 @@
         const { it } = createLine({ x: at.x, y: at.y }, { x: at.x + 200, y: at.y - 120 });
         db.put('items', it); touch(it.id); renderProjects();
       } },
+      { label: 'Shape', row: Object.entries(SHAPES).map(([k, S]) => ({ title: `Add ${S.label.toLowerCase()}`, icon: I[k], action: () => addShape(k, at) })) },
       'sep',
       { heading: 'Add text' },
       ...Object.entries(TEXT).map(([variant, t]) => ({
@@ -1506,7 +1760,7 @@
   const SHORTCUTS = [
     ['Tools', [['V', 'Select'], ['H  or hold Space', 'Pan'], ['A', 'Draw an arrow'], ['Esc', 'Clear selection']]],
     ['Canvas', [['⌘ + scroll / pinch', 'Zoom'], ['+  −', 'Zoom in / out'], ['⇧0', 'Zoom to 100%'], ['⇧1', 'Fit everything'], ['L', 'Back to last edited'], ['⌘\\', 'Show / hide projects']]],
-    ['Items', [['⌘C  ⌘X  ⌘V', 'Copy, cut, paste'], ['⌘Z  ⇧⌘Z', 'Undo, redo'], ['⌘D', 'Duplicate'], ['⌥ + drag', 'Duplicate while dragging'], ['⇧ + drag', 'Snap to the dots'], ['⌘A', 'Select all'], ['⌫', 'Delete']]],
+    ['Items', [['↵', 'Edit selected text'], ['⌘C  ⌘X  ⌘V', 'Copy, cut, paste'], ['⌘Z  ⇧⌘Z', 'Undo, redo'], ['⌘D', 'Duplicate'], ['⌥ + drag', 'Duplicate while dragging'], ['⇧ + drag', 'Snap to the dots'], ['⌘A', 'Select all'], ['⌫', 'Delete']]],
   ];
   function openShortcuts() {
     const cols = SHORTCUTS.map(([title, rows]) => `<section><h3>${title}</h3>${rows.map(([k, d]) => `<div class="sc-row"><span>${d}</span><kbd>${k}</kbd></div>`).join('')}</section>`).join('');
@@ -1588,7 +1842,9 @@
         if (!isHttpUrl(url)) { if (url) err.textContent = 'Enter a full link starting with https://'; return; }
         payload = { kind, url, name: url };
         submit.disabled = false;
-        if (kind === 'image') {
+        if (igCode(url)) {
+          showPreview(Object.assign(document.createElement('div'), { className: 'ig-mark', innerHTML: I.image }), 'Instagram post', 'Shows as the post’s preview on the canvas');
+        } else if (kind === 'image') {
           const img = new Image();
           img.onload = () => { if (my === seq) showPreview(img, hostOf(url), `${img.naturalWidth} × ${img.naturalHeight}`); };
           img.onerror = () => { if (my === seq) err.textContent = "Couldn't load a preview — you can still add it."; };
@@ -1628,10 +1884,21 @@
   function closeLightbox() { lb.hidden = true; lb.innerHTML = ''; }
   lb.addEventListener('click', e => { if (e.target === lb || e.target.closest('.lb-close')) closeLightbox(); });
   function openLightbox(it) {
-    if (!it || it.kind === 'text' || it.kind === 'line') return;
+    if (!it || it.kind === 'text' || it.kind === 'line' || it.kind === 'shape') return;
     lb.innerHTML = '<button class="lb-close" title="Close">×</button>';
     let node;
-    if (it.kind === 'image') {
+    const ig = !it.blob && igCode(it.url);
+    if (ig && !EMBEDDED) {
+      node = Object.assign(document.createElement('iframe'), { src: `https://www.instagram.com/p/${ig}/embed/captioned/`, className: 'lb-media lb-ig', title: 'Instagram post' });
+      const wrap = document.createElement('div');
+      wrap.className = 'lb-ig-wrap';
+      wrap.append(node, Object.assign(document.createElement('a'), { href: it.url, target: '_blank', rel: 'noopener noreferrer', className: 'lb-ig-link', textContent: 'Open on Instagram ↗' }));
+      node = wrap;
+    } else if (ig) {
+      node = document.createElement('div');
+      node.className = 'lb-link';
+      node.append(Object.assign(document.createElement('a'), { href: it.url, target: '_blank', rel: 'noopener noreferrer', textContent: 'Open on Instagram ↗' }));
+    } else if (it.kind === 'image') {
       node = Object.assign(new Image(), { src: srcOf(it), className: 'lb-media' });
     } else {
       const v = it.blob ? { provider: 'file' } : parseVideo(it.url) || {};
@@ -1685,7 +1952,7 @@
   const typing = t => t.closest?.('input, textarea') || t.isContentEditable;
   document.addEventListener('keydown', e => {
     if (typing(e.target)) return;
-    if (e.key === 'Escape') { closeCtx(); closeModal(); closeLightbox(); setSelection([]); if (state.tool === 'line') setTool('select'); return; }
+    if (e.key === 'Escape') { closeCtx(); closeShapes(); closeModal(); closeLightbox(); setSelection([]); if (state.tool === 'line') setTool('select'); return; }
     if (!modal.hidden || !lb.hidden) return;
     if (e.key === 'Alt') canvas.classList.add('alt');
     if (e.code === 'Space') { e.preventDefault(); if (!state.space) { state.space = true; canvas.classList.add('tool-hand'); } return; }
@@ -1698,6 +1965,10 @@
       return;
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && state.sel.size) { e.preventDefault(); removeSelected(); }
+    else if (e.key === 'Enter' && state.sel.size === 1) {         // Enter edits the selected text box
+      const it = selectedItems()[0], el = it && elOf(it.id);
+      if (it?.kind === 'text' && el) { e.preventDefault(); startEdit(it, el); }
+    }
     else if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomCenter(1.25); }
     else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomCenter(0.8); }
     else if (e.shiftKey && e.code === 'Digit0') zoomCenter(1 / view.z);

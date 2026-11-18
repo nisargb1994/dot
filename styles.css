@@ -223,6 +223,18 @@ svg { display: block; }
 .item.dragging { cursor: grabbing; }
 .card.dragging { box-shadow: 0 2px 4px rgba(0,0,0,.08), 0 24px 50px rgba(0,0,0,.2); }
 
+/* ---------- Shapes ---------- */
+.shape-svg { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; display: block; pointer-events: none; }
+
+/* ---------- Group box: scale a multi-selection from its corner ---------- */
+.group-box {
+  position: absolute; pointer-events: none; z-index: 2147483000; box-sizing: content-box;
+  margin: calc(-9px * var(--iz, 1)); padding: calc(8px * var(--iz, 1));
+  border: calc(1px * var(--iz, 1)) dashed #121214; border-radius: calc(4px * var(--iz, 1));
+}
+.group-box .handle { display: grid; pointer-events: auto; left: 100%; top: 100%; cursor: nwse-resize; }
+.world.group-scaling, .world.group-scaling * { cursor: nwse-resize !important; }
+
 /* ---------- Text (fixed type sizes) ---------- */
 .text { padding: 4px 6px; margin: -4px -6px; border-radius: 6px; color: var(--text); box-sizing: content-box; }
 .text:hover:not(.selected) { box-shadow: 0 0 0 calc(1px * var(--iz, 1)) #cfd1d6; }
@@ -249,6 +261,7 @@ svg { display: block; }
 .text.ts-dark-bg.editing, .text.ts-light-bg.editing { background: transparent; }
 
 .card .media { position: absolute; inset: 0; border-radius: inherit; overflow: hidden; }
+.card iframe.ig { position: absolute; left: 0; top: 0; border: 0; transform-origin: 0 0; pointer-events: none; background: #fff; }
 .card img, .card video { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
 .card .ph {
   position: absolute; inset: 0;
@@ -280,15 +293,35 @@ svg { display: block; }
 
 /* ---------- Overlays on stage ---------- */
 .toolbar {
-  position: absolute; top: 18px; left: 50%; transform: translateX(-50%);
-  display: flex; gap: 2px; padding: 4px; border-radius: 12px;
+  position: absolute; left: 18px; top: 50%; transform: translateY(-50%); z-index: 4;
+  display: flex; flex-direction: column; gap: 2px; padding: 4px; border-radius: 12px;
   background: rgba(255,255,255,.9); backdrop-filter: blur(10px);
   box-shadow: 0 0 0 1px var(--line), 0 6px 18px rgba(0,0,0,.06);
 }
-.tb { width: 36px; height: 32px; border-radius: 8px; display: grid; place-items: center; color: #2b2b2e; }
+.tb { width: 36px; height: 36px; border-radius: 8px; display: grid; place-items: center; color: #2b2b2e; }
 .tb:hover { background: var(--row-hover); }
 .tb.active { background: #121214; color: #fff; }
 .tb svg { width: 18px; height: 18px; }
+.tb.open { background: var(--row-hover); }
+.tb-sep { height: 1px; width: 22px; background: var(--line); margin: 3px auto; }
+.shape-pop {
+  position: absolute; left: 70px; top: 50%; z-index: 6;
+  display: grid; grid-template-columns: repeat(2, 1fr); gap: 4px; padding: 6px; border-radius: 12px;
+  background: #fff; box-shadow: 0 0 0 1px var(--line), var(--pop-shadow); animation: fade .12s ease-out;
+}
+.shape-pop[hidden] { display: none; }
+.sp-item { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 84px; padding: 10px 6px 8px; border-radius: 8px; font-size: 12px; font-weight: 500; color: #2b2b2e; }
+.sp-item:hover, .sp-item:focus-visible { background: var(--row-hover); outline: 0; }
+.sp-item svg { width: 26px; height: 26px; }
+
+/* Context menu: a row of icon choices (type, alignment, colour) */
+.ctx-row { display: flex; align-items: center; gap: 2px; padding: 3px 6px 3px 10px; }
+.ctx-row-label { font-size: 13px; color: var(--muted); font-weight: 500; margin-right: auto; padding-right: 12px; }
+.ctx-chip { width: 32px; height: 30px; border-radius: 7px; display: grid; place-items: center; color: #3a3a3e; }
+.ctx-chip:hover, .ctx-chip:focus-visible { background: var(--row-hover); outline: 0; }
+.ctx-chip.active { background: #121214; color: #fff; }
+.ctx-chip.active svg rect { stroke: #fff; }
+.ctx-chip svg { width: 17px; height: 17px; }
 .zb.disabled { opacity: .35; }
 .toast {
   position: fixed; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 80;
@@ -438,7 +471,6 @@ svg { display: block; }
 .crumb, .crumb-count { white-space: nowrap; }
 @media (max-width: 1100px) {
   .shell { --panel-w: 240px; }
-  .toolbar { left: auto; right: 18px; transform: none; }
   .help { display: none; }
 }
 @media (max-width: 760px) {
@@ -450,7 +482,6 @@ svg { display: block; }
   .panel-inner { padding: 22px 8px; }
   .panel-title { font-size: 19px; margin: 0 10px 16px; }
   .row, .add-row,   .stage { margin: 6px 6px 6px 0; }
-  .toolbar { top: 66px; }
 }
 @media (max-width: 560px) {
   .rail { width: 56px; }
@@ -460,7 +491,6 @@ svg { display: block; }
   .panel-inner { padding: 18px 6px; }
   .panel-section-label,   .divider { display: none; }
   .crumb { display: none; }
-  .toolbar { top: 14px; }
 }
 
 /* ---------- Lines / arrows ---------- */
@@ -494,3 +524,10 @@ svg { display: block; }
 .sc-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 0; font-size: 13.5px; border-bottom: 1px solid var(--line); }
 .sc-row:last-child { border-bottom: 0; }
 .sc-row kbd { font: 600 12px var(--font); color: var(--text); background: #f1f2f4; border: 1px solid var(--line); border-radius: 6px; padding: 3px 7px; white-space: nowrap; }
+
+/* Instagram in the lightbox */
+.lb-ig-wrap { display: flex; flex-direction: column; align-items: center; gap: 12px; max-height: 92vh; }
+.lightbox iframe.lb-ig { width: 420px; max-width: 92vw; height: min(780px, 84vh); border: 0; border-radius: 12px; background: #fff; }
+.lb-ig-link { color: #fff; font-size: 14px; }
+.ig-mark { width: 100%; height: 100%; display: grid; place-items: center; color: var(--muted); }
+.ig-mark svg { width: 26px; height: 26px; }
