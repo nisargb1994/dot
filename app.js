@@ -76,6 +76,7 @@
     upload: svg('<path d="M12 15V4M7.5 8.5 12 4l4.5 4.5"/><path d="M4 15v3.5A1.5 1.5 0 0 0 5.5 20h13a1.5 1.5 0 0 0 1.5-1.5V15"/>'),
     play: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 4.5v15l13-7.5z"/></svg>',
     open: svg('<path d="M14 4h6v6M20 4l-8 8M18 14v4.5a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 4 18.5v-11A1.5 1.5 0 0 1 5.5 6H10"/>'),
+    back: svg('<rect x="4" y="4" width="12" height="12" rx="2.5"/><path d="M8 16v2.5A1.5 1.5 0 0 0 9.5 20h9a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 18.5 8H16"/>'),
     front: svg('<rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/>'),
     trash: svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12.5A1.5 1.5 0 0 0 8.5 21h7a1.5 1.5 0 0 0 1.5-1.5L18 7M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7"/>'),
     edit: svg('<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/>'),
@@ -1071,6 +1072,20 @@
     });
   }
 
+  // Restack the board so the given items sit under everything else (keeping their own order).
+  function sendToBack(ids) {
+    const pick = new Set(ids);
+    const all = itemsHere().sort((a, b) => (a.z || 0) - (b.z || 0));
+    [...all.filter(i => pick.has(i.id)), ...all.filter(i => !pick.has(i.id))].forEach((it, n) => {
+      if (it.z === n + 1) return;
+      it.z = n + 1;
+      const el = elOf(it.id);
+      if (el) el.style.zIndex = it.z;
+      db.put('items', it);
+    });
+    state.topZ = Math.max(1, all.length);
+  }
+
   /* ---------------- Duplicate / copy / paste ---------------- */
   let clipboard = [];                    // snapshots of copied items (blob files included)
   let clipStamp = '';                    // marker written to the system clipboard on copy
@@ -1795,7 +1810,8 @@
       ...(selectedItems().some(i => i.kind !== 'line') ? [{ label: 'Rotate 90°', icon: I.rotate, action: () => rotateSelected(90) }] : []),
       ...(selectedItems().some(i => i.rot) ? [{ label: 'Reset rotation', icon: I.resetRot, action: () => rotateSelected(0, true) }] : []),
       { label: `New project from ${n > 1 ? plural(n, 'item') : 'selection'}`, icon: I.newProject, action: projectFromSelection },
-      { label: 'Bring to front', icon: I.front, action: () => { record(); bringToFront([...state.sel]); } },
+      { label: 'Bring to front', icon: I.front, hint: ']', action: () => { record(); bringToFront([...state.sel]); } },
+      { label: 'Send to back', icon: I.back, hint: '[', action: () => { record(); sendToBack([...state.sel]); } },
       'sep',
       { label: n > 1 ? `Delete ${plural(n, 'item')}` : 'Delete', icon: I.trash, hint: '⌫', danger: true, action: removeSelected },
     ];
@@ -1871,7 +1887,7 @@
   const SHORTCUTS = [
     ['Tools', [['V', 'Select'], ['H  or hold Space', 'Pan'], ['A', 'Draw an arrow'], ['Esc', 'Clear selection']]],
     ['Canvas', [['⌘ + scroll / pinch', 'Zoom'], ['+  −', 'Zoom in / out'], ['⇧0', 'Zoom to 100%'], ['⇧1', 'Fit everything'], ['L', 'Back to last edited'], ['⌘\\', 'Show / hide projects']]],
-    ['Items', [['↵', 'Edit selected text'], ['⌘C  ⌘X  ⌘V', 'Copy, cut, paste'], ['⌘Z  ⇧⌘Z', 'Undo, redo'], ['⌘D', 'Duplicate'], ['⌥ + drag', 'Duplicate while dragging'], ['⇧ + drag', 'Snap to the dots'], ['⌘A', 'Select all'], ['⌫', 'Delete']]],
+    ['Items', [['↵', 'Edit selected text'], ['⌘C  ⌘X  ⌘V', 'Copy, cut, paste'], ['⌘Z  ⇧⌘Z', 'Undo, redo'], ['⌘D', 'Duplicate'], [']  [', 'Bring to front / send to back'], ['⌥ + drag', 'Duplicate while dragging'], ['⇧ + drag', 'Snap to the dots'], ['⌘A', 'Select all'], ['⌫', 'Delete']]],
   ];
   function openShortcuts() {
     const cols = SHORTCUTS.map(([title, rows]) => `<section><h3>${title}</h3>${rows.map(([k, d]) => `<div class="sc-row"><span>${d}</span><kbd>${k}</kbd></div>`).join('')}</section>`).join('');
@@ -2080,6 +2096,7 @@
       const it = selectedItems()[0], el = it && elOf(it.id);
       if (it?.kind === 'text' && el) { e.preventDefault(); startEdit(it, el); }
     }
+    else if ((e.key === ']' || e.key === '[') && state.sel.size) { e.preventDefault(); record(); (e.key === ']' ? bringToFront : sendToBack)([...state.sel]); }
     else if (e.key === '=' || e.key === '+') { e.preventDefault(); zoomCenter(1.25); }
     else if (e.key === '-' || e.key === '_') { e.preventDefault(); zoomCenter(0.8); }
     else if (e.shiftKey && e.code === 'Digit0') zoomCenter(1 / view.z);
