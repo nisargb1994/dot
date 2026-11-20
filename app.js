@@ -2119,7 +2119,7 @@
   // Clicking anywhere outside the panel (except menus and dialogs) closes it.
   document.addEventListener('pointerdown', e => {
     if (shell.classList.contains('collapsed')) return;
-    if (e.target.closest('#panel, #dotBtn, .ctx, .modal-backdrop, .toast')) return;
+    if (e.target.closest('#panel, #dotBtn, .toolbar, #shapePop, .ctx, .modal-backdrop, .toast')) return;
     setCollapsed(true);
   }, true);
   // New project / folder from the bar: open the panel first so the name can be typed in place.

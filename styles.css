@@ -54,8 +54,7 @@ svg { display: block; }
 /* ---------- Projects panel (floats below the DOT button) ---------- */
 .panel {
   position: absolute; left: 20px; top: 80px; z-index: 30;
-  width: 310px; max-height: calc(100% - 100px);
-  overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain;
+  width: 310px; display: flex; overflow: hidden;
   background: rgba(255,255,255,.96); backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
   border-radius: 22px;
   box-shadow: 0 0 0 1px rgba(0,0,0,.05), 0 4px 10px rgba(0,0,0,.05), 0 24px 60px rgba(0,0,0,.16);
@@ -66,7 +65,14 @@ svg { display: block; }
   opacity: 0; transform: translateY(-8px) scale(.97); visibility: hidden; pointer-events: none;
   transition: opacity .14s ease, transform .14s ease, visibility 0s linear .14s;
 }
-.panel-inner { padding: 22px 14px 14px; display: flex; flex-direction: column; }
+/* Header and "Add" rows stay put; only the project list scrolls when it gets long */
+.panel-inner { padding: 22px 14px 14px; display: flex; flex-direction: column; width: 100%; max-height: calc(100vh - 100px); max-height: calc(100dvh - 100px); }
+.panel-inner .project-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; margin: 0 -6px; padding: 0 6px; scrollbar-width: thin; scrollbar-color: #d5d7dc transparent; }
+.panel-inner .project-list > *, .loose > *, .folder-children > * { flex-shrink: 0; }
+.panel-inner .project-list::-webkit-scrollbar { width: 6px; }
+.panel-inner .project-list::-webkit-scrollbar-thumb { background: #d5d7dc; border-radius: 3px; }
+.add-rows { flex: none; }
+.shell:not(.collapsed) .help { opacity: 0; }
 .panel-actions { display: flex; gap: 2px; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 2px 14px 14px; }
 .panel-head .panel-title { margin: 0; }
@@ -273,7 +279,10 @@ svg { display: block; }
   display: flex; flex-direction: column; gap: 2px; padding: 4px; border-radius: 12px;
   background: rgba(255,255,255,.9); backdrop-filter: blur(10px);
   box-shadow: 0 0 0 1px var(--line), 0 6px 18px rgba(0,0,0,.06);
+  transition: transform .18s ease;
 }
+/* When the projects panel is open, the toolbar slides out beside it instead of hiding underneath */
+.shell:not(.collapsed) .toolbar { transform: translate(calc(310px + 12px), -50%); }
 .tb { width: 36px; height: 36px; border-radius: 8px; display: grid; place-items: center; color: #2b2b2e; }
 .tb:hover { background: var(--row-hover); }
 .tb.active { background: #121214; color: #fff; }
@@ -454,8 +463,10 @@ svg { display: block; }
 }
 @media (max-width: 560px) {
   .dot-btn { left: 16px; top: 16px; width: 44px; height: 44px; }
-  .panel { left: 16px; top: 70px; width: calc(100% - 32px); max-height: calc(100% - 90px); }
+  .panel { left: 16px; top: 70px; width: calc(100% - 32px); }
+  .panel-inner { max-height: calc(100dvh - 90px); }
   .toolbar { left: 16px; }
+  .shell:not(.collapsed) .toolbar { transform: translateY(-50%); }   /* panel spans the screen here; it closes on canvas tap */
   .crumb-count { display: none; }
 }
 
