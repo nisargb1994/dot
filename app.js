@@ -79,6 +79,7 @@
     back: svg('<rect x="4" y="4" width="12" height="12" rx="2.5"/><path d="M8 16v2.5A1.5 1.5 0 0 0 9.5 20h9a1.5 1.5 0 0 0 1.5-1.5v-9A1.5 1.5 0 0 0 18.5 8H16"/>'),
     front: svg('<rect x="8" y="8" width="12" height="12" rx="2.5"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/>'),
     trash: svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12.5A1.5 1.5 0 0 0 8.5 21h7a1.5 1.5 0 0 0 1.5-1.5L18 7M9 7V4.5A1.5 1.5 0 0 1 10.5 3h3A1.5 1.5 0 0 1 15 4.5V7"/>'),
+    todo: svg('<rect x="3.5" y="4.5" width="6" height="6" rx="1.5"/><path d="m4.8 7.6 1.3 1.3 2.3-2.6M13 7.5h7.5M3.5 13.5h6v6h-6zM13 16.5h7.5"/>'),
     edit: svg('<path d="M4 20h4L19 9a2.8 2.8 0 0 0-4-4L4 16z"/>'),
     fit: svg('<path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/>', 2),
     select: svg('<path d="M5 3.5 18.5 10l-6 1.8L10 18z" fill="currentColor"/>', 1.6),
@@ -930,15 +931,15 @@
     }
 
     if (it.kind === 'text') {
-      el.className = `item text t-${it.variant} ts-${it.tstyle || 'dark'}`;
+      el.className = `item text t-${it.variant} ts-${it.tstyle || 'dark'}${it.todo ? ' todo' : ''}`;
       const t = document.createElement('div');
       t.className = 'txt';
       t.dataset.ph = TEXT[it.variant].ph;
-      t.textContent = it.text || '';
       el.style.textAlign = it.align || 'left';
+      renderText(t, it);
       t.addEventListener('keydown', ev => {
         ev.stopPropagation();
-        if (ev.key === 'Escape' || (ev.key === 'Enter' && it.variant !== 'paragraph' && !ev.shiftKey)) { ev.preventDefault(); endEdit?.(); }
+        if (ev.key === 'Escape' || (ev.key === 'Enter' && it.variant !== 'paragraph' && !it.todo && !ev.shiftKey)) { ev.preventDefault(); endEdit?.(); }
       });
       el.append(t);
     } else if (it.kind === 'shape') {
@@ -1197,9 +1198,46 @@
 
   /* ---------------- Text editing ---------------- */
   let endEdit = null;                    // finishes the text edit in progress, if any
+  // A to-do text shows one tickable row per line; otherwise it's plain text.
+  const JUSTIFY = { left: 'flex-start', center: 'center', right: 'flex-end' };
+  function renderText(t, it) {
+    t.closest('.item')?.classList.toggle('todo', !!it.todo);
+    if (!it.todo) { t.textContent = it.text || ''; return; }
+    t.textContent = '';
+    (it.text || '').split('\n').forEach((line, i) => {
+      const row = document.createElement('div');
+      row.className = 'todo-row';
+      row.style.justifyContent = JUSTIFY[it.align || 'left'];
+      if (line.trim()) {
+        row.dataset.i = i;
+        row.classList.toggle('done', !!it.done?.[i]);
+        row.innerHTML = '<span class="todo-box" role="checkbox"><svg viewBox="0 0 12 12"><path d="m2.6 6.2 2.3 2.3 4.5-4.9"/></svg></span><span class="todo-text"></span>';
+        row.lastChild.textContent = line;
+      } else row.innerHTML = '&nbsp;';
+      t.append(row);
+    });
+  }
+  function toggleTodo(it, i) {
+    record();
+    const done = [...(it.done || [])];
+    done[i] = !done[i];
+    it.done = done;
+    db.put('items', it);
+    elOf(it.id)?.querySelector(`.todo-row[data-i="${i}"]`)?.classList.toggle('done', done[i]);
+    touch(it.id);
+  }
+  // After editing, keep ticks on the lines that are still there.
+  function remapDone(it, oldText, newText) {
+    if (!it.done) return;
+    const ticked = [];
+    (oldText || '').split('\n').forEach((l, i) => { if (it.done[i]) ticked.push(l); });
+    it.done = newText.split('\n').map(l => { const k = ticked.indexOf(l); if (k < 0) return false; ticked.splice(k, 1); return true; });
+  }
+
   function startEdit(it, el, fresh = false) {
     if (endEdit) endEdit();
     const t = el.querySelector('.txt');
+    if (it.todo) t.textContent = it.text || '';
     try { t.contentEditable = 'plaintext-only'; } catch { t.contentEditable = 'true'; }
     el.classList.add('editing');
     t.focus();
@@ -1221,8 +1259,8 @@
         removeItem(it.id);
         return;
       }
-      t.textContent = v;
-      if (v !== it.text) { if (!fresh) record(); it.text = v; db.put('items', it); }
+      if (v !== it.text) { if (!fresh) record(); remapDone(it, it.text, v); it.text = v; db.put('items', it); }
+      renderText(t, it);
       touch(it.id);
     };
     endEdit = done;
@@ -1237,6 +1275,11 @@
     if (e.target.closest('.group-handle') && e.button === 0 && !panning()) {
       e.stopPropagation(); closeCtx(); endEdit?.();
       return startGroupResize(e, e.target.closest('.group-handle'));
+    }
+    const box = e.target.closest('.todo-box');
+    if (box && e.button === 0 && !panning() && state.tool !== 'line') {   // tick a to-do line without selecting or moving
+      e.stopPropagation(); closeCtx(); endEdit?.();
+      return toggleTodo(itemById(box.closest('.item').dataset.id), +box.parentElement.dataset.i);
     }
     const el = e.target.closest('.item');
     if (!el || e.button !== 0 || panning() || state.tool === 'line') return;   // hand/line tool: the canvas handles it
@@ -1492,6 +1535,7 @@
   }
   const setTextVariant = v => updateSelected('text', it => { it.variant = v; });
   const setTextAlign = a => updateSelected('text', it => { it.align = a; });
+  const setTodo = on => updateSelected('text', it => { it.todo = on; });
   const setShapeFill = f => { updateSelected('shape', it => { it.fill = f; }); lastShapeFill = f; try { localStorage.setItem('dot.shapeFill', f); } catch {} };
   let lastShapeFill = 'grey';
   try { lastShapeFill = localStorage.getItem('dot.shapeFill') || 'grey'; } catch {}
@@ -1519,7 +1563,7 @@
 
   world.addEventListener('dblclick', e => {
     const el = e.target.closest('.item');
-    if (!el || e.target.isContentEditable || panning()) return;
+    if (!el || e.target.isContentEditable || e.target.closest('.todo-box') || panning()) return;
     const it = itemById(el.dataset.id);
     if (it.kind === 'text') startEdit(it, el);
     else if (it.kind === 'line') updateLine(it, l => { l.bend = { t: 0.5, d: l.bend.d ? 0 : 0.25 }; });   // double-click toggles a curve
@@ -1786,6 +1830,9 @@
     return [
       { label: 'Type', row: Object.entries(TEXT).map(([v, t]) => ({ title: t.label, icon: I[v], active: only('variant', v), action: () => setTextVariant(v) })) },
       { label: 'Align', row: ALIGNS.map(a => ({ title: `Align ${a}`, icon: I['align' + a[0].toUpperCase() + a.slice(1)], active: only('align', a), action: () => setTextAlign(a) })) },
+      texts.every(i => i.todo)
+        ? { label: 'Remove checkboxes', icon: I.todo, action: () => setTodo(false) }
+        : { label: 'Make to-do list', icon: I.todo, action: () => setTodo(true) },
       'sep',
       { heading: 'Text style' },
       ...Object.entries(TEXT_STYLES).map(([key, st]) => ({
