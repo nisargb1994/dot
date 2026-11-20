@@ -447,6 +447,7 @@
   }
 
   function startRename(kind, id) {
+    setCollapsed(false);                                 // renaming happens in the panel, so show it
     const coll = kind === 'folder' ? state.folders : state.projects;
     const store = kind === 'folder' ? 'folders' : 'projects';
     const row = $(`.row[data-kind="${kind}"][data-id="${id}"]`);
@@ -553,23 +554,11 @@
 
   /* ---------------- Collapsible sidebar ---------------- */
   const shell = $('.shell');
-  function setCollapsed(v, animate = true) {
+  // The projects panel floats over the canvas; the DOT button in the corner opens and closes it.
+  function setCollapsed(v) {
     if (shell.classList.contains('collapsed') === v) return;
-    try { localStorage.setItem('dot.collapsed', v ? '1' : '0'); } catch {}
-    let last = rect().left;
-    if (!animate) shell.classList.add('no-anim');
     shell.classList.toggle('collapsed', v);
-    $('#railProjects').classList.toggle('active', !v);
-    $('#railProjects').setAttribute('aria-pressed', String(!v));
-    if (!animate) { void shell.offsetWidth; shell.classList.remove('no-anim'); return; }
-    // Keep the canvas content still on screen while the sidebar slides.
-    const t0 = performance.now();
-    const tick = () => {
-      const l = rect().left;
-      if (l !== last) { pan(last - l, 0); last = l; }
-      if (performance.now() - t0 < 450) requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
+    $('#dotBtn').setAttribute('aria-expanded', String(!v));
   }
   const togglePanel = () => setCollapsed(!shell.classList.contains('collapsed'));
 
@@ -2126,16 +2115,20 @@
   $('#redoBtn').onclick = redo;
   $('#addProject').onclick = () => addProject();
   $('#addFolder').onclick = () => addFolder();
-  $('#railProjects').onclick = togglePanel;
+  $('#dotBtn').onclick = togglePanel;
+  // Clicking anywhere outside the panel (except menus and dialogs) closes it.
+  document.addEventListener('pointerdown', e => {
+    if (shell.classList.contains('collapsed')) return;
+    if (e.target.closest('#panel, #dotBtn, .ctx, .modal-backdrop, .toast')) return;
+    setCollapsed(true);
+  }, true);
   // New project / folder from the bar: open the panel first so the name can be typed in place.
-  $('#railAddProject').onclick = () => { setCollapsed(false); addProject(); };
-  $('#railAddFolder').onclick = () => { setCollapsed(false); addFolder(); };
-  $('#railShortcuts').onclick = openShortcuts;
+  $('#panelShortcuts').onclick = () => { setCollapsed(true); openShortcuts(); };
 
   const typing = t => t.closest?.('input, textarea') || t.isContentEditable;
   document.addEventListener('keydown', e => {
     if (typing(e.target)) return;
-    if (e.key === 'Escape') { closeCtx(); closeShapes(); closeModal(); closeLightbox(); setSelection([]); if (state.tool === 'line') setTool('select'); return; }
+    if (e.key === 'Escape') { if (!shell.classList.contains('collapsed') && ctx.hidden && modal.hidden) return setCollapsed(true); closeCtx(); closeShapes(); closeModal(); closeLightbox(); setSelection([]); if (state.tool === 'line') setTool('select'); return; }
     if (!modal.hidden || !lb.hidden) return;
     if (e.key === 'Alt') canvas.classList.add('alt');
     if (e.code === 'Space') { e.preventDefault(); if (!state.space) { state.space = true; canvas.classList.add('tool-hand'); } return; }
@@ -2203,9 +2196,6 @@
   (async () => {
     [state.projects, state.items, state.folders] = await Promise.all([db.all('projects'), db.all('items'), db.all('folders')]);
     state.folders.sort((a, b) => a.createdAt - b.createdAt);
-    let collapsed = false;
-    try { collapsed = localStorage.getItem('dot.collapsed') === '1'; } catch {}
-    setCollapsed(collapsed, false);
     state.items.forEach(normalize);
     state.projects.sort((a, b) => a.createdAt - b.createdAt);
     setTool('select');
