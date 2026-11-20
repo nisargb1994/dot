@@ -281,8 +281,8 @@ svg { display: block; }
   box-shadow: 0 0 0 1px var(--line), 0 6px 18px rgba(0,0,0,.06);
   transition: transform .18s ease;
 }
-/* When the projects panel is open, the toolbar slides out beside it instead of hiding underneath */
-.shell:not(.collapsed) .toolbar { transform: translate(calc(310px + 12px), -50%); }
+/* When the open projects panel reaches down over the toolbar, the toolbar slides out beside it */
+.shell.tb-aside:not(.collapsed) .toolbar { transform: translate(calc(310px + 12px), -50%); }
 .tb { width: 36px; height: 36px; border-radius: 8px; display: grid; place-items: center; color: #2b2b2e; }
 .tb:hover { background: var(--row-hover); }
 .tb.active { background: #121214; color: #fff; }

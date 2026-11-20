@@ -559,7 +559,16 @@
     if (shell.classList.contains('collapsed') === v) return;
     shell.classList.toggle('collapsed', v);
     $('#dotBtn').setAttribute('aria-expanded', String(!v));
+    fitToolbar();
   }
+  // Move the toolbar aside only when the panel is tall enough to cover it.
+  const panelEl = $('#panel'), toolbarEl = $('.toolbar');
+  function fitToolbar() {
+    const top = (shell.clientHeight - toolbarEl.offsetHeight) / 2;           // toolbar's resting position
+    shell.classList.toggle('tb-aside', panelEl.offsetTop + panelEl.offsetHeight + 12 > top);
+  }
+  new ResizeObserver(fitToolbar).observe(panelEl);
+  addEventListener('resize', fitToolbar);
   const togglePanel = () => setCollapsed(!shell.classList.contains('collapsed'));
 
   /* ---------------- Share a project as a link ---------------- */
