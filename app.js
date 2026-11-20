@@ -1259,7 +1259,6 @@
   function startMove(e, el, prim, wasSelected) {
     const snapOf = it => ({ it, el: elOf(it.id), x: it.x, y: it.y, a: it.a && { ...it.a }, b: it.b && { ...it.b } });
     let group = [...state.sel].map(itemById).filter(Boolean).map(snapOf);
-    bringToFront(group.map(g => g.it.id));
     const ref = it => it.kind === 'line' ? it.a : it;
     const s = { x: e.clientX, y: e.clientY, px: ref(prim).x, py: ref(prim).y };
     let moved = false, cloned = false;
