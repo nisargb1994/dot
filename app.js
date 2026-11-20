@@ -1894,8 +1894,7 @@
       { heading: 'Add media' },
       { label: 'Add Image', icon: I.image, action: () => openAddModal('image', 'file', at) },
       { label: 'Add Video', icon: I.video, action: () => openAddModal('video', 'file', at) },
-      { label: 'Add Image Link', icon: I.link, action: () => openAddModal('image', 'link', at) },
-      { label: 'Add Video Link', icon: I.link, action: () => openAddModal('video', 'link', at) },
+      { label: 'Add Link', icon: I.link, action: () => openAddModal(null, 'link', at) },
       'sep',
       { heading: 'Add connector' },
       { label: 'Add Line', icon: I.line, hint: 'A', action: () => {
@@ -1950,11 +1949,10 @@
   modal.addEventListener('pointerdown', e => { if (e.target === modal) closeModal(); });
 
   function openAddModal(kind, source, at) {
-    const Noun = kind === 'image' ? 'Image' : 'Video';
-    const title = source === 'file' ? `Add ${Noun}` : `Add ${Noun} Link`;
+    const title = source === 'file' ? `Add ${kind === 'image' ? 'Image' : 'Video'}` : 'Add Link';
     const sub = source === 'file'
       ? (kind === 'image' ? 'Upload an image (PNG, JPG, GIF, WebP…) from your computer.' : 'Upload a video (MP4, WebM, MOV…) from your computer.')
-      : (kind === 'image' ? 'Paste a direct link to an image.' : 'Paste a YouTube, Vimeo, or direct video file link.');
+      : 'Paste a link to an image or video — YouTube, Vimeo, Instagram or a direct file. DOT works out which it is.';
 
     modal.innerHTML = `
       <form class="modal" autocomplete="off">
@@ -2013,20 +2011,32 @@
         const my = ++seq;
         err.textContent = ''; preview.hidden = true; payload = null; submit.disabled = true;
         if (!isHttpUrl(url)) { if (url) err.textContent = 'Enter a full link starting with https://'; return; }
-        payload = { kind, url, name: url };
-        submit.disabled = false;
+        const ready = (k, node, name, meta) => {
+          if (my !== seq) return;
+          payload = { kind: k, url, name: url };
+          showPreview(node, name, meta);
+          submit.disabled = false;
+        };
+        const v = parseVideo(url);
         if (igCode(url)) {
-          showPreview(Object.assign(document.createElement('div'), { className: 'ig-mark', innerHTML: I.image }), 'Instagram post', 'Shows as the post’s preview on the canvas');
-        } else if (kind === 'image') {
-          const img = new Image();
-          img.onload = () => { if (my === seq) showPreview(img, hostOf(url), `${img.naturalWidth} × ${img.naturalHeight}`); };
-          img.onerror = () => { if (my === seq) err.textContent = "Couldn't load a preview — you can still add it."; };
-          img.src = url;
-        } else {
-          const v = parseVideo(url);
-          const node = v.thumb ? Object.assign(new Image(), { src: v.thumb }) : null;
-          showPreview(node, v.provider === 'file' ? 'Video file' : v.provider, hostOf(url));
+          const reel = /\/(reels?|tv)\//.test(url);
+          return ready(reel ? 'video' : 'image', Object.assign(document.createElement('div'), { className: 'ig-mark', innerHTML: reel ? I.video : I.image }), reel ? 'Instagram reel' : 'Instagram post', 'Shows as the post’s preview on the canvas');
         }
+        if (v && (v.provider === 'YouTube' || v.provider === 'Vimeo'))
+          return ready('video', v.thumb ? Object.assign(new Image(), { src: v.thumb }) : null, `${v.provider} video`, hostOf(url));
+        // Anything else: see whether it loads as an image, then as a video.
+        preview.hidden = false; thumb.innerHTML = ''; preview.querySelector('b').textContent = 'Checking link…'; preview.querySelector('span').textContent = hostOf(url);
+        const asVideo = () => {
+          const vid = Object.assign(document.createElement('video'), { muted: true, preload: 'metadata' });
+          vid.onloadedmetadata = () => ready('video', vid, 'Video', `${hostOf(url)} · ${vid.videoWidth} × ${vid.videoHeight}`);
+          vid.onerror = () => { if (my === seq) { preview.hidden = true; err.textContent = "Couldn't find an image or video at that link. Try a direct link to the file."; } };
+          vid.src = url + (url.includes('#') ? '' : '#t=0.1');
+        };
+        if (v?.provider === 'file') return asVideo();
+        const img = new Image();
+        img.onload = () => ready('image', img, 'Image', `${hostOf(url)} · ${img.naturalWidth} × ${img.naturalHeight}`);
+        img.onerror = () => { if (my === seq) asVideo(); };
+        img.src = url;
       });
     }
 

@@ -5,7 +5,7 @@ An infinite dotted canvas for projects. Projects on the left; on the right, an i
 **Live:** https://nisargb1994.github.io/dot/
 
 ## Using it
-- Right-click the grid to add an image, video, image link, video link, heading, subheading or paragraph.
+- Right-click the grid to add an image, video, a link (image or video, detected automatically), heading, subheading or paragraph.
 - Drag on empty space to select; right-click a selection to duplicate it, copy it, or turn it into a new project.
 - Hold Space and drag (or use the Hand tool) to pan; ⌘/Ctrl + scroll or pinch to zoom.
 - Shift-drag snaps to the dots. Option/Alt-drag duplicates. Drag the bottom-right handle to resize and the top-right handle to rotate (Shift for 15° steps).
