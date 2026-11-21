@@ -1,6 +1,6 @@
 # DOT
 
-An infinite dotted canvas for projects. Projects on the left; on the right, an infinite grid where you arrange images, videos and text.
+An infinite dotted canvas for projects: arrange images, videos, text, shapes and arrows on an endless grid. Sign in and your boards follow you to any computer.
 
 **Live:** https://nisargb1994.github.io/dot/
 
@@ -12,7 +12,7 @@ An infinite dotted canvas for projects. Projects on the left; on the right, an i
 - Arrows: press **A** (or right-click → Add Line) and drag. Drop an end on an image, video or text to attach it — it follows the item when moved, resized or rotated. Drag the middle dot to curve; right-click for arrowheads, Straighten or Detach.
 - Right-click text → **Text style**: black text, white text, or Instagram-style black or white background that hugs each line.
 - Group projects into folders: **+ Add Folder**, then drag projects onto it (or right-click a project → Move to folder).
-- The black bar on the left shows/hides your projects (⌘\), creates projects and folders, and lists keyboard shortcuts (?).
+- The black dot in the top-left corner opens your projects (⌘\). Your account and Sign out are at the bottom of that panel.
 - Shapes (square, rectangle, triangle, circle) from the toolbar on the left; right-click a shape to change its colour.
 - Select a text box and press Enter to edit it; right-click text to switch Heading / Subheading / Paragraph or change alignment.
 - Select several items and drag the corner of the dashed box to scale them together.
@@ -20,7 +20,10 @@ An infinite dotted canvas for projects. Projects on the left; on the right, an i
 - Right-click a project → **Share project** to get a link. Opening it on any computer adds a copy of the project there (a snapshot; share again to send updates). Shared projects are stored in Supabase Storage (bucket `dot-shares`) and anyone with the link can view them.
 - ⌘Z / ⇧⌘Z undo and redo. ⌘C / ⌘V / ⌘X / ⌘D copy, paste, cut and duplicate. Press L to jump back to the last thing you edited.
 
-Everything is saved in your own browser (IndexedDB); nothing is uploaded.
+## Accounts and sync
+- Sign in with Google, with any email + password, or with a username + password (no email needed).
+- Boards are kept in the browser (IndexedDB, one database per account) and synced to Supabase: the `dot_docs` table (row-level security — each account sees only its own rows) and the private `dot-media` storage bucket (one folder per account). Changes made offline are queued and sent when you're back online.
+- The boards that were in a browser before accounts existed move into the first account that signs in there.
 
 ## Running locally
 Static files only — open with any static server:

@@ -120,18 +120,21 @@
     rect: svg('<rect x="3" y="7" width="18" height="10" rx="1.5"/>'),
     triangle: svg('<path d="M12 4.5 20.5 19h-17z"/>'),
     circle: svg('<circle cx="12" cy="12" r="7.5"/>'),
+    signOut: svg('<path d="M14 4.5h3.5a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H14M10 16l-4-4 4-4M6 12h9"/>'),
+    google: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.5a5.6 5.6 0 0 1-2.4 3.7v3h3.9c2.3-2.1 3.5-5.2 3.5-8.8z"/><path fill="#34A853" d="M12 24c3.2 0 6-1.1 7.9-2.9l-3.9-3c-1.1.7-2.4 1.2-4 1.2-3.1 0-5.7-2.1-6.6-4.9H1.4v3.1A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.4 14.4a7.2 7.2 0 0 1 0-4.7V6.6h-4a12 12 0 0 0 0 10.9z"/><path fill="#EA4335" d="M12 4.8c1.7 0 3.3.6 4.5 1.8l3.4-3.4A12 12 0 0 0 1.4 6.6l4 3.1C6.3 6.9 8.9 4.8 12 4.8z"/></svg>',
     share: svg('<path d="M12 15V3.5M7.5 8 12 3.5 16.5 8"/><path d="M5 12.5v6A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-6"/>'),
     newProject: svg('<path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>'),
   };
   document.querySelectorAll('[data-icon]').forEach(el => { el.innerHTML = I[el.dataset.icon] || ''; });
 
   /* ---------------- IndexedDB ---------------- */
-  const db = (() => {
+  // One local database per account ('dot-u-<id>'); the pre-login 'dot-app' one is read once for migration.
+  const makeDb = name => {
     let dbp;
     const mem = { projects: new Map(), items: new Map(), folders: new Map() };
     const open = () => dbp || (dbp = new Promise((res, rej) => {
       let req;
-      try { req = indexedDB.open('dot-app', 2); } catch (e) { return rej(e); }
+      try { req = indexedDB.open(name, 2); } catch (e) { return rej(e); }
       req.onupgradeneeded = () => {
         const d = req.result;
         const has = n => d.objectStoreNames.contains(n);
@@ -145,6 +148,7 @@
     const memOp = (store, op, v) => {
       const m = mem[store];
       if (op === 'all') return [...m.values()];
+      if (op === 'get') return m.get(v);
       if (op === 'put') m.set(v.id, v); else m.delete(v);
     };
     const tx = async (store, mode, fn, op, v) => {
@@ -158,11 +162,22 @@
       });
     };
     return {
+      get: (store, id) => tx(store, 'readonly', s => s.get(id), 'get', id).catch(() => mem[store].get(id)),
       all: store => tx(store, 'readonly', s => s.getAll(), 'all').catch(() => memOp(store, 'all')),
       put: (store, v) => tx(store, 'readwrite', s => s.put(v), 'put', v).catch(() => memOp(store, 'put', v)),
       del: (store, id) => tx(store, 'readwrite', s => s.delete(id), 'del', id).catch(() => memOp(store, 'del', id)),
     };
-  })();
+  };
+  // `db` is the signed-in account's database. Every put/del is also queued for the cloud copy.
+  let local = makeDb('dot-app');
+  const db = {
+    get: (s, id) => local.get(s, id),
+    all: s => local.all(s),
+    put: (s, v) => { const p = local.put(s, v); cloud.queue(s, v.id); return p; },
+    del: (s, id) => { const p = local.del(s, id); cloud.queue(s, id, true); return p; },
+    raw: { put: (s, v) => local.put(s, v), del: (s, id) => local.del(s, id) },   // cloud → local, not queued back
+    use: name => { local = makeDb(name); },
+  };
 
   /* ---------------- State ---------------- */
   const state = { projects: [], items: [], folders: [], current: null, sel: new Set(), topZ: 1, tool: 'select', space: false };
@@ -642,7 +657,7 @@
   // Open a #s=<id> link: download the share and add it as a new project (once per share).
   async function openSharedFromHash() {
     const id = (location.hash.match(/^#s=([a-z0-9]{6,40})$/) || [])[1];
-    if (!id) return false;
+    if (!id || !appStarted) return false;
     history.replaceState(null, '', location.pathname + location.search);
     const existing = state.projects.find(p => p.sharedFrom === id);
     if (existing) { openProject(existing.id); toast(`Opened “${existing.name}”`); return true; }
@@ -2201,17 +2216,384 @@
     openProject(p.id);
   }
 
-  /* ---------------- Boot ---------------- */
-  (async () => {
+  /* ---------------- Accounts: Supabase auth ---------------- */
+  const USER_DOMAIN = 'users.dot.invalid';            // username accounts get a private, undeliverable email
+  const sb = window.supabase?.createClient(SHARE.url, SHARE.key, {
+    auth: { flowType: 'pkce', detectSessionInUrl: true, persistSession: true, autoRefreshToken: true, storageKey: 'dot-auth' },
+  });
+  let me = null;                                       // the signed-in user
+  let appStarted = false;
+
+  /* ---------------- Cloud copy of the account's boards ---------------- */
+  // Local IndexedDB stays the fast working copy. Changes are queued (and the queue survives reloads),
+  // pushed in batches to the dot_docs table, and images/videos go to a private per-account folder.
+  const cloud = (() => {
+    let pending = new Map();                           // "store|id" -> true when deleted
+    let uploaded = new Set();                          // item ids whose file is already in storage
+    let timer = null, flushing = null, status = 'synced';
+    const k = name => `dot.${name}.${me.id}`;
+    const save = () => { try { localStorage.setItem(k('pending'), JSON.stringify([...pending])); } catch {} };
+    const saveUp = () => { try { localStorage.setItem(k('uploaded'), JSON.stringify([...uploaded])); } catch {} };
+    const setStatus = st => { status = st; renderMe(); };
+    const path = id => `${me.id}/${id}`;
+    const media = () => sb.storage.from('dot-media');
+
+    function start() {
+      try { pending = new Map(JSON.parse(localStorage.getItem(k('pending')) || '[]')); } catch { pending = new Map(); }
+      try { uploaded = new Set(JSON.parse(localStorage.getItem(k('uploaded')) || '[]')); } catch { uploaded = new Set(); }
+      addEventListener('online', () => schedule(0));
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') flush();
+        else refresh();
+      });
+    }
+    function queue(store, id, deleted = false) {
+      if (!me) return;
+      pending.set(`${store}|${id}`, deleted);
+      save(); setStatus('syncing'); schedule();
+    }
+    function schedule(ms = 1500) { clearTimeout(timer); timer = setTimeout(flush, ms); }
+
+    async function rowFor(key, deleted) {
+      const [store, id] = key.split('|');
+      const rec = deleted ? null : await db.get(store, id);
+      if (!rec) {
+        if (store === 'items' && uploaded.has(id)) { await media().remove([path(id)]).catch(() => {}); uploaded.delete(id); saveUp(); }
+        return { kind: store, id, data: null, deleted: true };
+      }
+      const { blob, ...data } = rec;
+      if (blob) {
+        if (!uploaded.has(id)) {
+          const { error } = await media().upload(path(id), blob, { upsert: true, contentType: blob.type || 'application/octet-stream' });
+          if (error) throw error;
+          uploaded.add(id); saveUp();
+        }
+        data.file = { type: blob.type || '', name: blob.name || rec.name || '' };
+      }
+      return { kind: store, id, data, deleted: false };
+    }
+    function flush() {
+      if (flushing) return flushing;
+      if (!me || !pending.size) { if (me && !pending.size) setStatus('synced'); return Promise.resolve(); }
+      flushing = (async () => {
+        const batch = [...pending];
+        try {
+          const rows = [];
+          for (const [key, del] of batch) rows.push(await rowFor(key, del));
+          for (let i = 0; i < rows.length; i += 200) {
+            const { error } = await sb.from('dot_docs').upsert(rows.slice(i, i + 200), { onConflict: 'user_id,kind,id' });
+            if (error) throw error;
+          }
+          for (const [key, del] of batch) if (pending.get(key) === del) pending.delete(key);   // keep anything changed meanwhile
+          save();
+          setStatus(pending.size ? 'syncing' : 'synced');
+        } catch (e) {
+          console.warn('DOT sync', e);
+          setStatus('offline');
+          schedule(15000);
+        } finally { flushing = null; }
+        if (pending.size && status !== 'offline') schedule(300);
+      })();
+      return flushing;
+    }
+
+    // Bring down everything changed on other devices since the last pull.
+    async function pull() {
+      let since = null;
+      try { since = localStorage.getItem(k('pulled')); } catch {}
+      let changed = 0, newest = since;
+      for (let from = 0; ; from += 1000) {
+        let q = sb.from('dot_docs').select('kind,id,data,deleted,updated_at').order('updated_at').range(from, from + 999);
+        if (since) q = q.gt('updated_at', since);
+        const { data, error } = await q;
+        if (error) throw error;
+        for (const row of data) {
+          newest = row.updated_at;
+          if (pending.has(`${row.kind}|${row.id}`)) continue;          // a local change wins; it's on its way up
+          changed++;
+          if (row.deleted || !row.data) { await db.raw.del(row.kind, row.id); continue; }
+          const rec = row.data;
+          if (row.kind === 'items' && rec.file) {
+            uploaded.add(rec.id);
+            const old = await db.get('items', rec.id);
+            rec.blob = old?.blob || null;
+            if (!rec.blob) rec.needsFile = true;
+          }
+          await db.raw.put(row.kind, rec);
+        }
+        if (data.length < 1000) break;
+      }
+      saveUp();
+      try { if (newest) localStorage.setItem(k('pulled'), newest); } catch {}
+      return changed;
+    }
+    // Download a synced image/video that isn't on this device yet.
+    async function fetchFile(it) {
+      const { data, error } = await media().download(path(it.id));
+      if (error) throw error;
+      it.blob = new File([data], it.file?.name || it.name || 'file', { type: it.file?.type || data.type });
+      delete it.needsFile;
+      await db.raw.put('items', it);
+      return it;
+    }
+    // Coming back to the tab: pick up changes made elsewhere.
+    let lastRefresh = Date.now();
+    async function refresh() {
+      if (!me || !appStarted || Date.now() - lastRefresh < 20000 || endEdit) return;
+      lastRefresh = Date.now();
+      try {
+        await flush();
+        if (await pull()) await reloadState();
+      } catch {}
+    }
+    return { start, queue, flush, pull, fetchFile, refresh, get status() { return status; }, uploaded: () => uploaded };
+  })();
+
+  async function loadState() {
     [state.projects, state.items, state.folders] = await Promise.all([db.all('projects'), db.all('items'), db.all('folders')]);
     state.folders.sort((a, b) => a.createdAt - b.createdAt);
     state.items.forEach(normalize);
     state.projects.sort((a, b) => a.createdAt - b.createdAt);
+  }
+  async function reloadState() {
+    const cur = state.current;
+    await loadState();
+    if (!state.projects.length) return;
+    if (state.projects.some(p => p.id === cur)) { renderProjects(); renderItems(); syncHistoryButtons(); }
+    else openProject(state.projects[0].id);
+    fetchMissingFiles();
+  }
+  // Images and videos synced from another device arrive in the background, current project first.
+  let fetchingFiles = false;
+  async function fetchMissingFiles() {
+    if (fetchingFiles) return;
+    fetchingFiles = true;
+    try {
+      for (;;) {
+        const missing = state.items.filter(i => i.needsFile);
+        if (!missing.length) break;
+        const it = missing.find(i => i.projectId === state.current) || missing[0];
+        try { await cloud.fetchFile(it); } catch { delete it.needsFile; continue; }
+        urls.delete(it.id);
+        const old = elOf(it.id);
+        if (old) { const el = itemEl(it); if (state.sel.has(it.id)) el.classList.add('selected'); old.replaceWith(el); place(el, it); }
+      }
+    } finally { fetchingFiles = false; }
+  }
+
+  // The boards that were in this browser before accounts existed move into the first account that signs in here.
+  async function adoptLegacy() {
+    let owner = null;
+    try { owner = localStorage.getItem('dot.legacyOwner'); } catch {}
+    if (owner) return;
+    try { localStorage.setItem('dot.legacyOwner', me.id); } catch {}
+    const legacy = makeDb('dot-app');
+    const [ps, its, fs] = await Promise.all([legacy.all('projects'), legacy.all('items'), legacy.all('folders')]);
+    for (const f of fs) await db.put('folders', f);
+    for (const p of ps) await db.put('projects', p);
+    for (const it of its) await db.put('items', it);
+  }
+
+  /* ---------------- Login screen ---------------- */
+  const auth = $('#auth');
+  let signup = false;
+  const displayName = u => {
+    const m = u?.user_metadata || {};
+    return m.full_name || m.name || m.username || (u?.email || '').split('@')[0] || 'You';
+  };
+  const subtitleOf = u => {
+    const m = u?.user_metadata || {};
+    if ((u?.email || '').endsWith('@' + USER_DOMAIN)) return '@' + (m.username || u.email.split('@')[0]);
+    return u?.email || '';
+  };
+  function setAuthMode(up) {
+    signup = up;
+    $('#authGo').textContent = up ? 'Create account' : 'Log in';
+    $('#authQ').textContent = up ? 'Have an account?' : 'New to DOT?';
+    $('#authMode').textContent = up ? 'Log in' : 'Create an account';
+    $('#authPass').autocomplete = up ? 'new-password' : 'current-password';
+    $('#authErr').textContent = '';
+  }
+  function showLogin(msg = '') {
+    document.body.classList.add('locked');
+    auth.hidden = false;
+    $('#authErr').textContent = msg;
+    setTimeout(() => $('#authId').focus(), 50);
+  }
+  const friendly = e => {
+    const m = (e?.message || String(e || '')).toLowerCase();
+    if (m.includes('invalid login')) return 'That email/username and password don’t match.';
+    if (m.includes('already registered') || m.includes('already been registered') || m.includes('already exists')) return 'That account already exists — try logging in.';
+    if (m.includes('password') && (m.includes('6') || m.includes('short') || m.includes('weak'))) return 'Use a password of at least 6 characters.';
+    if (m.includes('provider is not enabled') || m.includes('unsupported provider')) return 'Google sign-in isn’t switched on yet.';
+    if (m.includes('fetch') || m.includes('network')) return 'Can’t reach DOT right now. Check your connection.';
+    if (m.includes('rate') || m.includes('too many')) return 'Too many tries. Wait a minute and try again.';
+    return e?.message || 'Something went wrong. Try again.';
+  };
+  $('#authGoogle').insertAdjacentHTML('afterbegin', I.google);
+  $('#authMode').onclick = () => setAuthMode(!signup);
+  $('#authGoogle').onclick = async () => {
+    try {
+      sessionStorage.setItem('dot.intro', '1');
+      if (location.hash) sessionStorage.setItem('dot.hash', location.hash);
+    } catch {}
+    try {                                              // don't send people to a raw error page if Google isn't switched on
+      const st = await (await fetch(`${SHARE.url}/auth/v1/settings`, { headers: { apikey: SHARE.key } })).json();
+      if (!st.external?.google) return $('#authErr').textContent = 'Google sign-in is coming soon — use email or a username for now.';
+    } catch {}
+    const { error } = await sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin + location.pathname } });
+    if (error) $('#authErr').textContent = friendly(error);
+  };
+  $('#authForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const err = $('#authErr'), go = $('#authGo');
+    const id = $('#authId').value.trim(), pass = $('#authPass').value;
+    err.textContent = '';
+    if (!id) return err.textContent = 'Enter your email or a username.';
+    const isEmail = id.includes('@');
+    if (isEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(id)) return err.textContent = 'That email doesn’t look right.';
+    if (!isEmail && !/^[a-z0-9._-]{3,24}$/i.test(id)) return err.textContent = 'Usernames are 3–24 letters, numbers, dots, dashes or underscores.';
+    if (pass.length < 6) return err.textContent = 'Use a password of at least 6 characters.';
+    const email = isEmail ? id : `${id.toLowerCase()}@${USER_DOMAIN}`;
+    go.disabled = true; go.classList.add('busy');
+    try {
+      const res = signup
+        ? await sb.auth.signUp({ email, password: pass, options: { data: isEmail ? {} : { username: id.toLowerCase() } } })
+        : await sb.auth.signInWithPassword({ email, password: pass });
+      if (res.error) throw res.error;
+      if (!res.data.session) { err.textContent = 'Check your inbox to confirm your email, then log in.'; setAuthMode(false); return; }
+      await startApp(res.data.session.user, true);
+    } catch (ex) { err.textContent = friendly(ex); }
+    finally { go.disabled = false; go.classList.remove('busy'); }
+  });
+
+  /* ---------------- Profile (bottom of the projects panel) ---------------- */
+  function renderMe() {
+    if (!me) return;
+    const av = $('#meAv'), url = me.user_metadata?.avatar_url;
+    av.innerHTML = '';
+    if (url) av.append(Object.assign(new Image(), { src: url, alt: '', referrerPolicy: 'no-referrer' }));
+    else av.textContent = displayName(me).slice(0, 1).toUpperCase();
+    $('#meName').textContent = displayName(me);
+    const st = cloud.status;
+    $('#meSub').textContent = st === 'offline' ? 'Offline — saved here, will sync' : st === 'syncing' ? 'Syncing…' : subtitleOf(me);
+    $('#me').dataset.sync = st;
+  }
+  async function signOut() {
+    toast('Signing out…');
+    await cloud.flush().catch(() => {});
+    await sb.auth.signOut().catch(() => {});
+    try { sessionStorage.clear(); } catch {}
+    location.replace(location.pathname);
+  }
+  $('#meBtn').onclick = e => {
+    const r = e.currentTarget.getBoundingClientRect();
+    openCtx(r.left, r.top - 8, [
+      { heading: subtitleOf(me) || displayName(me) },
+      { label: 'Sign out', icon: I.signOut, action: signOut },
+    ]);
+    const c = $('#ctx'); c.style.top = Math.max(8, r.top - c.offsetHeight - 8) + 'px';
+  };
+
+  /* ---------------- "It all started with a dot" intro ---------------- */
+  function playIntro() {
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce) return Promise.resolve();
+    const ov = document.createElement('div');
+    ov.className = 'intro';
+    ov.innerHTML = '<div class="intro-grid"></div><div class="intro-dot"><span class="logo-mark"></span></div><p class="intro-type"><span></span><i></i></p>';
+    document.body.append(ov);
+    document.body.classList.add('intro-on');
+    const dot = ov.querySelector('.intro-dot'), type = ov.querySelector('.intro-type span'), grid = ov.querySelector('.intro-grid');
+    const wait = ms => new Promise(r => setTimeout(r, ms));
+    let skip = false;
+    const skipper = () => { skip = true; };
+    ov.addEventListener('pointerdown', skipper);
+    addEventListener('keydown', skipper, { once: true });
+    return (async () => {
+      await wait(250);
+      dot.classList.add('in');
+      await wait(700);
+      const line = 'it all started with a dot.';
+      for (const ch of line) { if (skip) break; type.textContent += ch; await wait(ch === ' ' ? 110 : 70); }
+      type.textContent = line;
+      if (!skip) await wait(900);
+      ov.querySelector('.intro-type').classList.add('out');
+      await wait(skip ? 0 : 350);
+      // Copy the canvas's own dot grid so the two line up when the overlay fades.
+      const cs = getComputedStyle(canvas);
+      grid.style.backgroundPosition = cs.backgroundPosition;
+      grid.style.backgroundSize = cs.backgroundSize;
+      const maxR = Math.hypot(innerWidth, innerHeight) / 2 + 120;
+      const t0 = performance.now(), dur = skip ? 300 : 1300;
+      await new Promise(res => {
+        const tick = now => {
+          const t = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - t, 3), r = e * maxR;
+          grid.style.setProperty('--r', r + 'px');
+          t < 1 ? requestAnimationFrame(tick) : res();
+        };
+        requestAnimationFrame(tick);
+      });
+      // The centre dot flies to its home in the top-left corner.
+      const to = $('#dotBtn').getBoundingClientRect(), from = dot.getBoundingClientRect();
+      const dx = to.left + to.width / 2 - (from.left + from.width / 2), dy = to.top + to.height / 2 - (from.top + from.height / 2);
+      dot.classList.add('fly');
+      dot.style.transform = `translate(${dx}px, ${dy}px) scale(1)`;
+      await wait(skip ? 250 : 900);
+      document.body.classList.remove('intro-on');
+      ov.classList.add('done');
+      await wait(450);
+      ov.remove();
+      removeEventListener('keydown', skipper);
+    })();
+  }
+
+  /* ---------------- Start the app for a signed-in account ---------------- */
+  async function startApp(user, intro = false) {
+    if (appStarted) return;
+    appStarted = true;
+    me = user;
+    try { sessionStorage.removeItem('dot.intro'); } catch {}
+    auth.hidden = true;
+    document.body.classList.remove('locked');
+    const introDone = intro ? playIntro() : Promise.resolve();
+    db.use('dot-u-' + me.id);
+    cloud.start();
+    renderMe();
+    try { await cloud.flush(); await cloud.pull(); } catch (e) { console.warn('DOT sync', e); }
+    await adoptLegacy().catch(e => console.warn('DOT migrate', e));
+    await loadState();
     setTool('select');
-    if (!state.projects.length) return (await openSharedFromHash()) || seedWelcome();   // first visit via a share link: just that project
-    let last = null;
-    try { last = localStorage.getItem('dot.current'); } catch {}
-    openProject(state.projects.some(p => p.id === last) ? last : state.projects[0].id);
-    openSharedFromHash();
+    // Put back a share link that a Google sign-in redirect carried along.
+    try { const h = sessionStorage.getItem('dot.hash'); if (h) { sessionStorage.removeItem('dot.hash'); history.replaceState(null, '', location.pathname + h); } } catch {}
+    if (!state.projects.length) { if (!(await openSharedFromHash())) await seedWelcome(); }
+    else {
+      let last = null;
+      try { last = localStorage.getItem('dot.current'); } catch {}
+      openProject(state.projects.some(p => p.id === last) ? last : state.projects[0].id);
+      openSharedFromHash();
+    }
+    fetchMissingFiles();
+    cloud.flush();
+    await introDone;
+  }
+
+  /* ---------------- Boot ---------------- */
+  (async () => {
+    if (!sb) return showLogin('Can’t load DOT’s sign-in right now. Check your connection and reload.');
+    const { data } = await sb.auth.getSession();
+    // Drop the one-time ?code= that Google sign-in leaves in the address bar.
+    if (location.search.includes('code=')) history.replaceState(null, '', location.pathname + location.hash);
+    if (!data.session) {
+      const qs = new URLSearchParams(location.hash.slice(1) + '&' + location.search.slice(1));
+      return showLogin(qs.get('error_description') ? friendly({ message: qs.get('error_description') }) : '');
+    }
+    let intro = false;
+    try { intro = sessionStorage.getItem('dot.intro') === '1'; } catch {}
+    startApp(data.session.user, intro);
   })();
+  sb?.auth.onAuthStateChange((ev, session) => {
+    if (ev === 'SIGNED_OUT' && appStarted) location.replace(location.pathname);
+    if (ev === 'USER_UPDATED' && session) { me = session.user; renderMe(); }
+  });
 })();

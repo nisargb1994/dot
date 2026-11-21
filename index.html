@@ -14,7 +14,7 @@
   <script type="application/ld+json">{"@context":"https://schema.org","@type":"WebApplication","name":"DOT","url":"https://nisargb1994.github.io/dot/","applicationCategory":"DesignApplication","operatingSystem":"Any (web browser)","description":"Free infinite dotted canvas for organising projects visually with images, videos, text and arrows.","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"}}</script>
   <link rel="stylesheet" href="styles.css" />
 </head>
-<body>
+<body class="locked">
   <div class="shell collapsed">
     <!-- Canvas -->
     <main class="stage" id="stage">
@@ -76,8 +76,29 @@
           <button class="add-row" id="addProject"><span class="add-plus">+</span> Add Project</button>
           <button class="add-row" id="addFolder"><span class="add-plus">+</span> Add Folder</button>
         </div>
+        <div class="me" id="me">
+          <button class="me-btn" id="meBtn" aria-label="Your account">
+            <span class="me-av" id="meAv"></span>
+            <span class="me-text"><b id="meName"></b><span id="meSub"></span></span>
+          </button>
+        </div>
       </div>
     </aside>
+  </div>
+
+  <!-- Sign in -->
+  <div class="auth" id="auth" hidden>
+    <form class="auth-card" id="authForm" novalidate autocomplete="on">
+      <div class="auth-dot"><span class="logo-mark"></span></div>
+      <p class="auth-tag">it all started with a dot.</p>
+      <button type="button" class="auth-google" id="authGoogle">Continue with Google</button>
+      <div class="auth-or"><span>or</span></div>
+      <input class="auth-in" id="authId" name="username" placeholder="Email or username" autocomplete="username" autocapitalize="none" spellcheck="false" />
+      <input class="auth-in" id="authPass" name="password" type="password" placeholder="Password" autocomplete="current-password" />
+      <div class="auth-err" id="authErr" role="alert"></div>
+      <button type="submit" class="auth-go" id="authGo">Log in</button>
+      <p class="auth-switch"><span id="authQ">New to DOT?</span> <button type="button" id="authMode">Create an account</button></p>
+    </form>
   </div>
 
   <div class="ctx" id="ctx" hidden></div>
@@ -85,6 +106,7 @@
   <div class="lightbox" id="lightbox" hidden></div>
   <div class="toast" id="toast" hidden></div>
 
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>
