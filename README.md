@@ -10,13 +10,17 @@ An infinite dotted canvas for projects: arrange images, videos, text, shapes and
 - Hold Space and drag (or use the Hand tool) to pan; ⌘/Ctrl + scroll or pinch to zoom.
 - Shift-drag snaps to the dots. Option/Alt-drag duplicates. Drag the bottom-right handle to resize and the top-right handle to rotate (Shift for 15° steps).
 - Arrows: press **A** (or right-click → Add Line) and drag. Drop an end on an image, video or text to attach it — it follows the item when moved, resized or rotated. Drag the middle dot to curve; right-click for arrowheads, Straighten or Detach.
-- Right-click text → **Text style**: black text, white text, or Instagram-style black or white background that hugs each line.
+- Right-click text → **Text style**: black text, white text, or a square black or white background that hugs each line.
 - Group projects into folders: **+ Add Folder**, then drag projects onto it (or right-click a project → Move to folder).
 - The black dot in the top-left corner opens your projects (⌘\). Your account and Sign out are at the bottom of that panel.
 - Shapes (square, rectangle, triangle, circle) from the toolbar on the left; right-click a shape to change its colour.
 - Select a text box and press Enter to edit it; right-click text to switch Heading / Subheading / Paragraph or change alignment.
 - Select several items and drag the corner of the dashed box to scale them together.
-- Instagram post and reel links show the post's preview.
+- Instagram post and reel links show the post's preview. Pinterest pin links (pinterest.com/pin/…) show the pin's image.
+- The toolbar on the left: Select, Hand, Arrow, Text (T), Shapes, Upload (U) and Link (K).
+- Selecting anything shows a bar above it: align left / centre / right / top / middle / bottom (⌥A ⌥H ⌥D ⌥W ⌥V ⌥S), space evenly (3+ items), lock, front/back, duplicate, delete and more. One item aligns to the shape it sits on, or to the view.
+- Lock (⇧⌘L, or the lock at an item's bottom-left corner) keeps items in place: they can't be moved, resized or deleted, and dragging on them selects around them.
+- Moving and resizing snap to the edges and centres of other items (pink guides); hold ⌘ to move freely. Arrow keys nudge (Shift for 10).
 - Right-click a project → **Share project** to get a link. Opening it on any computer adds a copy of the project there (a snapshot; share again to send updates). Shared projects are stored in Supabase Storage (bucket `dot-shares`) and anyone with the link can view them.
 - ⌘Z / ⇧⌘Z undo and redo. ⌘C / ⌘V / ⌘X / ⌘D copy, paste, cut and duplicate. Press L to jump back to the last thing you edited.
 

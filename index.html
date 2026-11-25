@@ -25,11 +25,16 @@
       <div class="toolbar">
         <button class="tb" data-tool="select" data-icon="select" title="Select (V)"></button>
         <button class="tb" data-tool="hand" data-icon="hand" title="Hand — pan (H, or hold Space)"></button>
-        <button class="tb" data-tool="line" data-icon="line" title="Line — drag to draw, drop on an item to attach (A)"></button>
+        <button class="tb" data-tool="line" data-icon="line" title="Arrow — drag to draw, drop on an item to attach (A)"></button>
         <span class="tb-sep"></span>
+        <button class="tb" id="textBtn" data-icon="text" title="Text (T)" aria-haspopup="true" aria-expanded="false"></button>
         <button class="tb" id="shapesBtn" data-icon="shapes" title="Shapes" aria-haspopup="true" aria-expanded="false"></button>
+        <button class="tb" id="uploadBtn" data-icon="upload" title="Upload image or video (U)"></button>
+        <button class="tb" id="linkBtn" data-icon="link" title="Add link — image, video, Instagram, Pinterest (K)"></button>
       </div>
       <div class="shape-pop" id="shapePop" hidden></div>
+      <div class="shape-pop text-pop" id="textPop" hidden></div>
+      <div class="selbar" id="selbar" hidden></div>
 
       <div class="topbar">
         <div class="crumb"><span class="crumb-folder" id="crumbFolder" hidden></span><span class="crumb-name" id="crumbName">—</span><span class="crumb-count" id="crumbCount"></span></div>

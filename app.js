@@ -51,6 +51,34 @@
       return (u.pathname.match(/\/(?:p|reels?|tv)\/([A-Za-z0-9_-]+)/) || [])[1] || null;
     } catch { return null; }
   };
+  // Pinterest pins: the page link is turned into the pin's image (Pinterest's public widget API allows this).
+  const pinId = url => {
+    try {
+      const u = new URL(url);
+      if (!/(^|\.)pinterest\.[a-z.]+$/i.test(u.hostname)) return null;
+      return (u.pathname.match(/\/pin\/(?:[^/]*--)?(\d{5,})/) || [])[1] || null;
+    } catch { return null; }
+  };
+  const isPinShort = url => /^https?:\/\/(www\.)?pin\.it\//i.test(url);
+  async function pinImage(id) {
+    const r = await fetch(`https://widgets.pinterest.com/v3/pidgets/pins/info/?pin_ids=${id}`);
+    const d = (await r.json())?.data?.[0];
+    const im = d?.images || {};
+    const u = im['564x']?.url || im['237x']?.url || im['236x']?.url;
+    if (!u) throw new Error('no image');
+    return [u.replace(/\/(564x|23[67]x)\//, '/736x/'), u];       // the bigger size first, the listed one as a fallback
+  }
+  // Load the first image in `srcs` that works.
+  const loadFirst = srcs => new Promise((res, rej) => {
+    const next = i => {
+      if (i >= srcs.length) return rej(new Error('no image'));
+      const img = new Image();
+      img.onload = () => res(img);
+      img.onerror = () => next(i + 1);
+      img.src = srcs[i];
+    };
+    next(0);
+  });
   let lastTextStyle = 'dark';
   try { lastTextStyle = localStorage.getItem('dot.textStyle') || 'dark'; } catch {}
   if (!TEXT_STYLES[lastTextStyle]) lastTextStyle = 'dark';
@@ -124,6 +152,18 @@
     google: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.5a5.6 5.6 0 0 1-2.4 3.7v3h3.9c2.3-2.1 3.5-5.2 3.5-8.8z"/><path fill="#34A853" d="M12 24c3.2 0 6-1.1 7.9-2.9l-3.9-3c-1.1.7-2.4 1.2-4 1.2-3.1 0-5.7-2.1-6.6-4.9H1.4v3.1A12 12 0 0 0 12 24z"/><path fill="#FBBC05" d="M5.4 14.4a7.2 7.2 0 0 1 0-4.7V6.6h-4a12 12 0 0 0 0 10.9z"/><path fill="#EA4335" d="M12 4.8c1.7 0 3.3.6 4.5 1.8l3.4-3.4A12 12 0 0 0 1.4 6.6l4 3.1C6.3 6.9 8.9 4.8 12 4.8z"/></svg>',
     share: svg('<path d="M12 15V3.5M7.5 8 12 3.5 16.5 8"/><path d="M5 12.5v6A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-6"/>'),
     newProject: svg('<path d="M3.5 7.5A2 2 0 0 1 5.5 5.5h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>'),
+    // Arrange: align edges / centres, spread evenly, lock in place
+    aL: svg('<path d="M4 3.5v17"/><rect x="7.5" y="6" width="12" height="4.5" rx="1"/><rect x="7.5" y="13.5" width="7" height="4.5" rx="1"/>'),
+    aC: svg('<path d="M12 3.5v2.5M12 10.5v3M12 18v2.5"/><rect x="5" y="6" width="14" height="4.5" rx="1"/><rect x="8" y="13.5" width="8" height="4.5" rx="1"/>'),
+    aR: svg('<path d="M20 3.5v17"/><rect x="4.5" y="6" width="12" height="4.5" rx="1"/><rect x="9.5" y="13.5" width="7" height="4.5" rx="1"/>'),
+    aT: svg('<path d="M3.5 4h17"/><rect x="6" y="7.5" width="4.5" height="12" rx="1"/><rect x="13.5" y="7.5" width="4.5" height="7" rx="1"/>'),
+    aM: svg('<path d="M3.5 12h2.5M10.5 12h3M18 12h2.5"/><rect x="6" y="5" width="4.5" height="14" rx="1"/><rect x="13.5" y="8" width="4.5" height="8" rx="1"/>'),
+    aB: svg('<path d="M3.5 20h17"/><rect x="6" y="4.5" width="4.5" height="12" rx="1"/><rect x="13.5" y="9.5" width="4.5" height="7" rx="1"/>'),
+    distH: svg('<path d="M4 4v16M20 4v16"/><rect x="9.5" y="7" width="5" height="10" rx="1"/>'),
+    distV: svg('<path d="M4 4h16M4 20h16"/><rect x="7" y="9.5" width="10" height="5" rx="1"/>'),
+    lock: svg('<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>'),
+    unlock: svg('<rect x="5" y="10.5" width="14" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 7.6-1.7"/>'),
+    more: svg('<circle cx="6" cy="12" r="1.3" fill="currentColor"/><circle cx="12" cy="12" r="1.3" fill="currentColor"/><circle cx="18" cy="12" r="1.3" fill="currentColor"/>', 0),
   };
   document.querySelectorAll('[data-icon]').forEach(el => { el.innerHTML = I[el.dataset.icon] || ''; });
 
@@ -253,6 +293,7 @@
     world.style.setProperty('--iz', 1 / view.z);
     canvas.style.backgroundPosition = `${bg.x - GRID / 2}px ${bg.y - GRID / 2}px`;
     $('#zoomReset').textContent = Math.round(view.z * 100) + '%';
+    if (state.sel.size) queueGroupBox();
     saveViewSoon();
   }
   let viewTimer;
@@ -816,16 +857,175 @@
   function updateGroupBox() {
     let gb = world.querySelector('.group-box');
     const its = selectedItems();
+    renderSelbar(its);
     if (its.length < 2) { gb?.remove(); return; }
     if (!gb) {
       gb = document.createElement('div');
       gb.className = 'group-box';
-      gb.innerHTML = `<div class="handle group-handle" title="Drag to scale the selection · Shift snaps to the dots">${I.resize}</div>`;
+      gb.innerHTML = `<div class="handle group-handle" title="Drag to scale the selection · Shift snaps to the dots">${I.resize}</div><div class="lock-btn" title="Lock / unlock position  ⇧⌘L">${I.unlock}${I.lock}</div>`;
       world.append(gb);
     }
+    gb.classList.toggle('locked', its.every(i => i.locked));
     const G = groupAabb(its);
     Object.assign(gb.style, { left: G.x + 'px', top: G.y + 'px', width: G.w + 'px', height: G.h + 'px' });
   }
+
+  /* ---------------- Smart guides: edges and centres line up with other items ---------------- */
+  const SNAP_PX = 6;                     // on-screen reach of a guide
+  const busy = on => stage.classList.toggle('busy', on);   // hides the selection bar during a gesture
+  function guideLines(exclude) {
+    const xs = [], ys = [];
+    for (const it of itemsHere()) {
+      if (exclude.has(it.id) || it.kind === 'line') continue;
+      const b = aabb(it);
+      xs.push(b.x, b.x + b.w / 2, b.x + b.w);
+      ys.push(b.y, b.y + b.h / 2, b.y + b.h);
+    }
+    return { xs, ys };
+  }
+  // Smallest shift that puts one of `vals` on a guide line, or null when none is within reach.
+  function nearest(vals, list) {
+    const reach = SNAP_PX / view.z;
+    let best = null;
+    for (const v of vals) for (const l of list) {
+      const d = l - v;
+      if (Math.abs(d) <= reach && (best === null || Math.abs(d) < Math.abs(best))) best = d;
+    }
+    return best;
+  }
+  function clearGuides() { world.querySelectorAll('.guide').forEach(g => g.remove()); }
+  // Draw every guide line that one of the (already snapped) values now sits exactly on.
+  function showGuides(X, Y, lines) {
+    clearGuides();
+    const r = rect(), a = toWorld(r.left, r.top), b = toWorld(r.right, r.bottom);
+    const hit = (vals, list) => [...new Set(list.filter(l => vals.some(v => Math.abs(l - v) < 0.5)).map(l => Math.round(l * 100) / 100))];
+    for (const x of hit(X, lines.xs)) world.insertAdjacentHTML('beforeend', `<div class="guide gv" style="left:${x}px;top:${a.y}px;height:${b.y - a.y}px"></div>`);
+    for (const y of hit(Y, lines.ys)) world.insertAdjacentHTML('beforeend', `<div class="guide gh" style="top:${y}px;left:${a.x}px;width:${b.x - a.x}px"></div>`);
+  }
+
+  /* ---------------- Lock, align, distribute ---------------- */
+  function toggleLock(ids = [...state.sel]) {
+    const its = ids.map(itemById).filter(Boolean);
+    if (!its.length) return;
+    const on = !its.every(i => i.locked);
+    record();
+    for (const it of its) {
+      if (on) it.locked = true; else delete it.locked;
+      elOf(it.id)?.classList.toggle('locked', on);
+      db.put('items', it);
+    }
+    syncSel();
+    toast(on ? `Locked ${its.length > 1 ? plural(its.length, 'item') : 'in place'}` : `Unlocked ${its.length > 1 ? plural(its.length, 'item') : ''}`.trim());
+  }
+  // Move an item by (dx, dy): lines move their free ends, attached ends follow their items.
+  function shiftItem(it, dx, dy) {
+    if (!dx && !dy) return;
+    const r = v => Math.round(v * 100) / 100;
+    if (it.kind === 'line') { for (const k of ['a', 'b']) if (!it[k].attach) { it[k].x = r(it[k].x + dx); it[k].y = r(it[k].y + dy); } }
+    else { it.x = r(it.x + dx); it.y = r(it.y + dy); }
+    const el = elOf(it.id);
+    if (el) place(el, it);
+    db.put('items', it);
+  }
+  // What one item lines up against: the smallest item under it that holds it whole, else the visible canvas.
+  function alignTarget(it) {
+    const b = aabb(it);
+    const holder = itemsHere()
+      .filter(o => o.id !== it.id && o.kind !== 'line' && (o.z || 0) < (it.z || 0))
+      .map(aabb)
+      .filter(c => c.x <= b.x + .5 && c.y <= b.y + .5 && c.x + c.w >= b.x + b.w - .5 && c.y + c.h >= b.y + b.h - .5)
+      .sort((p, q) => p.w * p.h - q.w * q.h)[0];
+    if (holder) return holder;
+    const r = rect(), pad = 72, a = toWorld(r.left + pad, r.top + pad), c = toWorld(r.right - pad, r.bottom - pad);
+    return { x: a.x, y: a.y, w: c.x - a.x, h: c.y - a.y };
+  }
+  const ALIGN = {
+    left:    { label: 'Align left',      icon: 'aL', key: 'A', f: (b, R) => [R.x - b.x, 0] },
+    hcenter: { label: 'Align centres',   icon: 'aC', key: 'H', f: (b, R) => [R.x + R.w / 2 - (b.x + b.w / 2), 0] },
+    right:   { label: 'Align right',     icon: 'aR', key: 'D', f: (b, R) => [R.x + R.w - (b.x + b.w), 0] },
+    top:     { label: 'Align top',       icon: 'aT', key: 'W', f: (b, R) => [0, R.y - b.y] },
+    middle:  { label: 'Align middles',   icon: 'aM', key: 'V', f: (b, R) => [0, R.y + R.h / 2 - (b.y + b.h / 2)] },
+    bottom:  { label: 'Align bottom',    icon: 'aB', key: 'S', f: (b, R) => [0, R.y + R.h - (b.y + b.h)] },
+  };
+  function alignSelected(mode) {
+    const its = selectedItems();
+    const movers = its.filter(i => !i.locked);
+    if (!its.length) return;
+    if (!movers.length) return toast('Locked — unlock to move');
+    // Several items line up with each other (locked ones stay put and set the line); one item lines up with what holds it.
+    const locked = its.filter(i => i.locked);
+    const R = its.length > 1 ? groupAabb(locked.length ? locked : its) : alignTarget(its[0]);
+    record();
+    for (const it of movers) { const [dx, dy] = ALIGN[mode].f(aabb(it), R); shiftItem(it, dx, dy); }
+    touch(movers[movers.length - 1].id);
+    queueGroupBox();
+  }
+  // Equal gaps between items, from the first to the last along the axis.
+  function distribute(axis) {
+    const its = selectedItems();
+    if (its.length < 3) return;
+    const X = axis === 'x', pos = b => X ? b.x : b.y, size = b => X ? b.w : b.h;
+    const bs = its.map(it => ({ it, b: aabb(it) })).sort((p, q) => pos(p.b) + size(p.b) / 2 - pos(q.b) - size(q.b) / 2);
+    const first = bs[0].b, last = bs[bs.length - 1].b;
+    const gap = (pos(last) + size(last) - pos(first) - bs.reduce((t, p) => t + size(p.b), 0)) / (bs.length - 1);
+    record();
+    let at = pos(first);
+    for (const { it, b } of bs) {
+      if (!it.locked) shiftItem(it, X ? at - b.x : 0, X ? 0 : at - b.y);
+      at += size(b) + gap;
+    }
+    touch(bs[bs.length - 1].it.id);
+    queueGroupBox();
+  }
+
+  /* ---------------- Selection bar: quick actions above whatever is selected ---------------- */
+  const selbar = $('#selbar');
+  let selbarSig = '';
+  function renderSelbar(its = selectedItems()) {
+    if (!its.length || stage.classList.contains('editing-text')) { selbar.hidden = true; selbarSig = ''; return; }
+    const n = its.length, allLocked = its.every(i => i.locked);
+    const sig = `${n > 2 ? 3 : n}:${allLocked}`;
+    if (sig !== selbarSig) {
+      selbarSig = sig;
+      const to = n > 1 ? '' : ' (to the shape under it, or the view)';
+      const b = (act, icon, title, cls = '') => `<button class="sb${cls}" data-act="${act}" title="${title}" aria-label="${title.split('  ')[0]}">${icon}</button>`;
+      selbar.innerHTML = [
+        ...Object.entries(ALIGN).map(([k, a]) => b(k, I[a.icon], `${a.label}${to}  ⌥${a.key}`)),
+        ...(n > 2 ? ['<span class="sb-sep"></span>', b('distX', I.distH, 'Space evenly across'), b('distY', I.distV, 'Space evenly down')] : []),
+        '<span class="sb-sep"></span>',
+        b('lock', allLocked ? I.lock : I.unlock, allLocked ? 'Unlock  ⇧⌘L' : 'Lock position  ⇧⌘L', allLocked ? ' on' : ''),
+        b('front', I.front, 'Bring to front  ]'),
+        b('back', I.back, 'Send to back  ['),
+        '<span class="sb-sep"></span>',
+        b('dup', I.duplicate, 'Duplicate  ⌘D'),
+        b('del', I.trash, 'Delete  ⌫'),
+        b('more', I.more, 'More options'),
+      ].join('');
+    }
+    selbar.hidden = false;
+    // Sit centred above the selection; drop below it when there's no room, and stay on screen.
+    const G = groupAabb(its), r = rect();
+    const x1 = view.x + G.x * view.z, y1 = view.y + G.y * view.z, x2 = x1 + G.w * view.z, y2 = y1 + G.h * view.z;
+    const bw = selbar.offsetWidth, bh = selbar.offsetHeight, top0 = 70;
+    let top = y1 - bh - 22;
+    if (top < top0) top = y2 + 26;
+    if (top > r.height - bh - 74) top = clamp(y1 - bh - 22, top0, r.height - bh - 74);
+    selbar.style.left = clamp((x1 + x2) / 2 - bw / 2, 12, Math.max(12, r.width - bw - 12)) + 'px';
+    selbar.style.top = top + 'px';
+  }
+  selbar.addEventListener('pointerdown', e => e.stopPropagation());
+  selbar.addEventListener('click', e => {
+    const b = e.target.closest('[data-act]');
+    if (!b) return;
+    const a = b.dataset.act;
+    if (ALIGN[a]) return alignSelected(a);
+    if (a === 'distX' || a === 'distY') return distribute(a === 'distX' ? 'x' : 'y');
+    if (a === 'lock') return toggleLock();
+    if (a === 'front' || a === 'back') { record(); return (a === 'front' ? bringToFront : sendToBack)([...state.sel]); }
+    if (a === 'dup') return duplicate();
+    if (a === 'del') return removeSelected();
+    if (a === 'more') { const r = b.getBoundingClientRect(); openCtx(r.left, r.bottom + 8, selectionEntries()); }
+  });
 
   /* ---------------- Lines / arrows ---------------- */
   const LINE_GAP = 6;                    // space between an attached end and the item's edge
@@ -936,7 +1136,7 @@
     el.dataset.id = it.id;
 
     if (it.kind === 'line') {
-      el.className = 'item line';
+      el.className = 'item line' + (it.locked ? ' locked' : '');
       el.innerHTML = `<svg class="lsvg" aria-hidden="true"><path class="hit"/><path class="stroke"/><path class="head head-b"/><path class="head head-a"/></svg>
         <div class="lh" data-end="a" title="Drag onto an item to attach"></div><div class="lh lh-mid" data-end="m" title="Drag to curve"></div><div class="lh" data-end="b" title="Drag onto an item to attach"></div>`;
       place(el, it);
@@ -1030,7 +1230,13 @@
     rh.className = 'rot-handle';
     rh.title = 'Drag to rotate · Shift for 15° steps';
     rh.innerHTML = I.rotate;
-    el.append(h, rh);
+    // Bottom-left: lock the item in place (shown when selected, or on hover once locked).
+    const lk = document.createElement('div');
+    lk.className = 'lock-btn';
+    lk.title = 'Lock / unlock position  ⇧⌘L';
+    lk.innerHTML = I.unlock + I.lock;
+    el.append(h, rh, lk);
+    el.classList.toggle('locked', !!it.locked);
     place(el, it);
     return el;
   }
@@ -1064,7 +1270,8 @@
     if (rerender) { elOf(id)?.remove(); syncSel(); renderProjects(); }
   }
   async function removeSelected() {
-    const ids = [...state.sel];
+    const ids = [...state.sel].filter(id => !itemById(id)?.locked);
+    if (ids.length < state.sel.size) toast(ids.length ? 'Locked items were kept — unlock them to delete' : 'Locked — unlock it to delete');
     if (ids.length) record();
     for (const id of ids) await removeItem(id);
   }
@@ -1073,6 +1280,7 @@
   function syncSel() {
     world.querySelectorAll('.item').forEach(el => el.classList.toggle('selected', state.sel.has(el.dataset.id)));
     world.classList.toggle('multi', state.sel.size > 1);
+    world.classList.toggle('has-locked', selectedItems().some(i => i.locked));
     updateGroupBox();
   }
 
@@ -1201,6 +1409,11 @@
     }
     // A pasted link to an image or video
     if (isHttpUrl(text)) {
+      if (pinId(text)) {
+        e.preventDefault();
+        pinImage(pinId(text)).then(loadFirst).then(img => addItem({ kind: 'image', url: img.src, name: text }, at)).catch(() => toast("Couldn't get that pin's image"));
+        return;
+      }
       if (igCode(text)) { e.preventDefault(); return addItem({ kind: /\/(reels?|tv)\//.test(text) ? 'video' : 'image', url: text, name: text }, at); }
       const v = parseVideo(text);
       if (v && (v.provider === 'YouTube' || v.provider === 'Vimeo' || v.provider === 'file')) { e.preventDefault(); return addItem({ kind: 'video', url: text, name: text }, at); }
@@ -1253,6 +1466,7 @@
     if (it.todo) t.textContent = it.text || '';
     try { t.contentEditable = 'plaintext-only'; } catch { t.contentEditable = 'true'; }
     el.classList.add('editing');
+    stage.classList.add('editing-text'); renderSelbar();
     t.focus();
     const range = document.createRange();
     range.selectNodeContents(t);
@@ -1265,6 +1479,7 @@
       getSelection().removeAllRanges();
       t.contentEditable = 'false';
       el.classList.remove('editing');
+      stage.classList.remove('editing-text'); queueGroupBox();
       const v = t.innerText.replace(/\s+$/, '').replace(/^\s+/, '');
       if (!v) {
         if (fresh) { hist().undo.pop(); syncHistoryButtons(); }   // an abandoned new text box leaves no step behind
@@ -1285,6 +1500,12 @@
 
   world.addEventListener('pointerdown', e => {
     if (e.target.isContentEditable) { e.stopPropagation(); return; }   // caret placement while editing text
+    const lk = e.target.closest('.lock-btn');
+    if (lk && e.button === 0 && !panning()) {
+      e.stopPropagation(); closeCtx(); endEdit?.();
+      const id = lk.closest('.group-box') ? null : lk.closest('.item').dataset.id;
+      return toggleLock(id && !state.sel.has(id) ? [id] : [...state.sel]);
+    }
     if (e.target.closest('.group-handle') && e.button === 0 && !panning()) {
       e.stopPropagation(); closeCtx(); endEdit?.();
       return startGroupResize(e, e.target.closest('.group-handle'));
@@ -1300,6 +1521,10 @@
     closeCtx();
     endEdit?.();
     const it = itemById(el.dataset.id);
+    if (it.locked) {                                       // locked: stays put; dragging on it selects around it
+      if (e.shiftKey) { state.sel.has(it.id) ? state.sel.delete(it.id) : state.sel.add(it.id); return syncSel(); }
+      return startMarquee(e, it.id);
+    }
     const lh = e.target.closest('.lh');
     if (lh) { setSelection([it.id]); return startLineHandle(e, el, it, lh.dataset.end); }
     if (e.target.closest('.rot-handle')) return startRotate(e, el, it);
@@ -1314,8 +1539,12 @@
 
   function startMove(e, el, prim, wasSelected) {
     const snapOf = it => ({ it, el: elOf(it.id), x: it.x, y: it.y, a: it.a && { ...it.a }, b: it.b && { ...it.b } });
-    let group = [...state.sel].map(itemById).filter(Boolean).map(snapOf);
+    let group = [...state.sel].map(itemById).filter(i => i && !i.locked).map(snapOf);
+    const boxes = group.filter(g => g.it.kind !== 'line').map(g => g.it);
+    const G0 = boxes.length ? groupAabb(boxes) : null;    // what lines up with the other items
+    const lines = G0 && guideLines(new Set(group.map(g => g.it.id)));
     const ref = it => it.kind === 'line' ? it.a : it;
+    if (!group.length) return;
     const s = { x: e.clientX, y: e.clientY, px: ref(prim).x, py: ref(prim).y };
     let moved = false, cloned = false;
     el.setPointerCapture(e.pointerId);
@@ -1335,12 +1564,20 @@
           cloned = byOrig.size > 0;
         }
         group.forEach(g => g.el?.classList.add('dragging'));
+        busy(true);
       }
       let dx = (ev.clientX - s.x) / view.z, dy = (ev.clientY - s.y) / view.z;
       if (ev.shiftKey) {                                       // Shift = snap to the dots
         const p = snapWorld(s.px + dx, s.py + dy);
         dx = p.x - s.px; dy = p.y - s.py;
-      }
+        clearGuides();
+      } else if (G0 && !ev.metaKey && !ev.ctrlKey) {           // otherwise edges and centres snap to other items (⌘ to move freely)
+        const X = [G0.x, G0.x + G0.w / 2, G0.x + G0.w].map(v => v + dx), Y = [G0.y, G0.y + G0.h / 2, G0.y + G0.h].map(v => v + dy);
+        const sx = nearest(X, lines.xs), sy = nearest(Y, lines.ys);
+        if (sx) dx += sx;
+        if (sy) dy += sy;
+        showGuides(X.map(v => v + (sx || 0)), Y.map(v => v + (sy || 0)), lines);
+      } else clearGuides();
       for (const g of group) {
         if (g.it.kind === 'line') {                            // free ends move; attached ends follow their item
           for (const k of ['a', 'b']) if (!g.it[k].attach) { g.it[k].x = Math.round((g[k].x + dx) * 100) / 100; g.it[k].y = Math.round((g[k].y + dy) * 100) / 100; }
@@ -1356,6 +1593,7 @@
       el.removeEventListener('pointerup', up);
       el.removeEventListener('pointercancel', up);
       group.forEach(g => g.el?.classList.remove('dragging'));
+      clearGuides(); busy(false);
       if (moved) { group.forEach(g => db.put('items', g.it)); touch(prim.id); if (cloned) toast(`Duplicated ${plural(group.length, 'item')}`); }
       else if (ev.shiftKey && wasSelected) { state.sel.delete(prim.id); syncSel(); }
       else if (!ev.shiftKey && wasSelected && state.sel.size > 1) setSelection([prim.id]);
@@ -1382,6 +1620,8 @@
     const anchor = { x: c0.x + a.x, y: c0.y + a.y };       // opposite corner, pinned in world space
     el.setPointerCapture(e.pointerId);
     el.classList.add('resizing');
+    busy(true);
+    const lines = !it.rot && guideLines(new Set([it.id]));   // unrotated items snap their moving edges to other items
     const move = ev => {
       once();
       const dX = (ev.clientX - s.x) / view.z, dY = (ev.clientY - s.y) / view.z;
@@ -1391,28 +1631,42 @@
         const wFromH = (s.h + sy * ly) * ar;
         if (Math.abs(wFromH - s.w) > Math.abs(w - s.w)) w = wFromH;
       }
+      let hFree = free ? s.h + sy * ly : null;
       const step = GRID / view.z;
-      if (ev.shiftKey) w = Math.round(w / step) * step;
-      w = Math.max(minW, Math.round(w));
+      let snapped = false;
+      if (ev.shiftKey) { w = Math.round(w / step) * step; if (free) hFree = Math.round(hFree / step) * step; }
+      if (lines && !ev.shiftKey && !ev.metaKey && !ev.ctrlKey) {
+        const x0 = anchor.x, y0 = anchor.y;
+        const rx = nearest([x0 + w], lines.xs, true);
+        const by = it.kind === 'text' ? null : nearest([y0 + (free ? hFree : w / ar)], lines.ys, true);
+        if (ar) {                                              // ratio-locked: snap whichever edge is closer
+          if (rx != null && (by == null || Math.abs(rx) <= Math.abs(by * ar))) w += rx;
+          else if (by != null) w = (w / ar + by) * ar;
+        } else {
+          if (rx != null) w += rx;
+          if (by != null) hFree += by;
+        }
+        snapped = rx != null || by != null;
+      }
+      w = Math.max(minW, snapped ? Math.round(w * 100) / 100 : Math.round(w));
       it.w = w;
       let h;
-      if (ar) h = it.h = Math.round(w / ar);
-      else if (free) {
-        h = s.h + sy * ly;
-        if (ev.shiftKey) h = Math.round(h / step) * step;
-        h = it.h = Math.max(24, Math.round(h));
-      }
+      if (ar) h = it.h = snapped ? Math.round(w / ar * 100) / 100 : Math.round(w / ar);
+      else if (free) h = it.h = Math.max(24, snapped ? Math.round(hFree * 100) / 100 : Math.round(hFree));
       else { el.style.width = w + 'px'; h = contentH(it, el); }
       const v = R(sx * w / 2, sy * h / 2);
       it.x = Math.round((anchor.x + v.x - w / 2) * 100) / 100;
       it.y = Math.round((anchor.y + v.y - h / 2) * 100) / 100;
       place(el, it);
+      if (lines && !ev.shiftKey && !ev.metaKey && !ev.ctrlKey) showGuides([it.x + w], it.kind === 'text' ? [] : [it.y + h], lines);
+      else clearGuides();
     };
     const up = () => {
       el.removeEventListener('pointermove', move);
       el.removeEventListener('pointerup', up);
       el.removeEventListener('pointercancel', up);
       el.classList.remove('resizing');
+      clearGuides(); busy(false);
       db.put('items', it);
       touch(it.id);
     };
@@ -1432,6 +1686,7 @@
     stage.append(tip);
     el.setPointerCapture(e.pointerId);
     el.classList.add('rotating');
+    busy(true);
     const move = ev => {
       once();
       let d = normDeg(r0 + ang(ev) - a0);
@@ -1449,6 +1704,7 @@
       el.removeEventListener('pointercancel', up);
       el.classList.remove('rotating');
       tip.remove();
+      busy(false);
       db.put('items', it);
       touch(it.id);
     };
@@ -1480,8 +1736,9 @@
   // Text keeps its fixed type size: its box widens or narrows and the words re-flow.
   function startGroupResize(e, handle) {
     const its = selectedItems();
-    if (its.length < 2) return;
+    if (its.length < 2 || its.some(i => i.locked)) return;
     const G = groupAabb(its), A = { x: G.x, y: G.y };
+    busy(true);
     const snaps = its.map(it => it.kind === 'line'
       ? { it, a: { ...it.a }, b: { ...it.b } }
       : { it, x: it.x, y: it.y, w: it.w, h: it.kind === 'text' ? null : it.h });
@@ -1520,6 +1777,7 @@
       handle.removeEventListener('pointerup', up);
       handle.removeEventListener('pointercancel', up);
       world.classList.remove('group-scaling');
+      busy(false);
       its.forEach(it => db.put('items', it));
       touch(its[its.length - 1].id);
     };
@@ -1707,11 +1965,11 @@
     canvas.addEventListener('pointercancel', up);
   }
 
-  function startMarquee(e) {
+  function startMarquee(e, clickId) {
     const base = e.shiftKey ? new Set(state.sel) : new Set();
     if (!e.shiftKey) setSelection([]);
     const r = rect(), sx = e.clientX, sy = e.clientY;
-    const boxes = [...world.querySelectorAll('.item')].map(el => ({ id: el.dataset.id, r: (el.classList.contains('line') ? el.querySelector('.stroke') : el).getBoundingClientRect() }));
+    const boxes = [...world.querySelectorAll('.item:not(.locked)')].map(el => ({ id: el.dataset.id, r: (el.classList.contains('line') ? el.querySelector('.stroke') : el).getBoundingClientRect() }));
     let box = null;
     canvas.setPointerCapture(e.pointerId);
     const move = ev => {
@@ -1726,6 +1984,7 @@
       syncSel();
     };
     const up = () => {
+      if (!box && clickId) setSelection([clickId]);
       box?.remove();
       canvas.removeEventListener('pointermove', move);
       canvas.removeEventListener('pointerup', up);
@@ -1780,6 +2039,43 @@
     addShape(b.dataset.shape);
   });
   document.addEventListener('pointerdown', e => { if (!shapePop.hidden && !e.target.closest('#shapePop, #shapesBtn')) closeShapes(); }, true);
+
+  // Text: a flyout of the three types; T adds a paragraph straight away.
+  const textBtn = $('#textBtn'), textPop = $('#textPop');
+  textPop.innerHTML = Object.entries(TEXT).map(([k, t]) => `<button class="sp-item" data-text="${k}">${I[k]}<span>${t.label}</span></button>`).join('');
+  const closeTextPop = () => { textPop.hidden = true; textBtn.classList.remove('open'); textBtn.setAttribute('aria-expanded', 'false'); };
+  async function addTextAt(variant, at = viewCenter()) {
+    setTool('select');
+    const { it, el } = await addItem({ kind: 'text', variant, text: '', tstyle: lastTextStyle }, { x: at.x - TEXT[variant].w / 2, y: at.y - 20 });
+    startEdit(it, el, true);
+  }
+  textBtn.addEventListener('click', () => {
+    closeShapes();
+    const open = textPop.hidden;
+    textPop.hidden = !open;
+    if (open) {
+      const r = textBtn.getBoundingClientRect(), sr = stage.getBoundingClientRect();
+      textPop.style.left = r.right - sr.left + 10 + 'px';
+      textPop.style.top = Math.min(r.top - sr.top - 6, sr.height - textPop.offsetHeight - 12) + 'px';
+    }
+    textBtn.classList.toggle('open', open);
+    textBtn.setAttribute('aria-expanded', String(open));
+  });
+  textPop.addEventListener('click', e => { const b = e.target.closest('[data-text]'); if (b) { closeTextPop(); addTextAt(b.dataset.text); } });
+  document.addEventListener('pointerdown', e => { if (!textPop.hidden && !e.target.closest('#textPop, #textBtn')) closeTextPop(); }, true);
+  shapesBtn.addEventListener('click', closeTextPop);
+
+  // Upload: images and videos from the computer land in the middle of the view.
+  const uploadInput = Object.assign(document.createElement('input'), { type: 'file', accept: 'image/*,video/*', multiple: true, hidden: true });
+  document.body.append(uploadInput);
+  uploadInput.addEventListener('change', () => {
+    const at = viewCenter();
+    const files = [...uploadInput.files].filter(f => /^(image|video)\//.test(f.type));
+    files.forEach((f, i) => addItem({ kind: f.type.split('/')[0], blob: f, name: f.name }, { x: at.x + (i - (files.length - 1) / 2) * (BASE_W + 24), y: at.y }));
+    uploadInput.value = '';
+  });
+  $('#uploadBtn').addEventListener('click', () => { closeShapes(); closeTextPop(); setTool('select'); uploadInput.click(); });
+  $('#linkBtn').addEventListener('click', () => { closeShapes(); closeTextPop(); setTool('select'); openAddModal(null, 'link', viewCenter()); });
 
   // Instagram embeds report their height; size the card to match the post.
   addEventListener('message', e => {
@@ -1868,6 +2164,14 @@
       'sep',
       ...(selectedItems().some(i => i.kind !== 'line') ? [{ label: 'Rotate 90°', icon: I.rotate, action: () => rotateSelected(90) }] : []),
       ...(selectedItems().some(i => i.rot) ? [{ label: 'Reset rotation', icon: I.resetRot, action: () => rotateSelected(0, true) }] : []),
+      { label: 'Arrange', row: Object.entries(ALIGN).map(([k, a]) => ({ title: `${a.label}  ⌥${a.key}`, icon: I[a.icon], action: () => alignSelected(k) })) },
+      ...(n > 2 ? [{ label: 'Space evenly', row: [
+        { title: 'Space evenly across', icon: I.distH, action: () => distribute('x') },
+        { title: 'Space evenly down', icon: I.distV, action: () => distribute('y') }] }] : []),
+      selectedItems().every(i => i.locked)
+        ? { label: 'Unlock', icon: I.unlock, hint: '⇧⌘L', action: () => toggleLock() }
+        : { label: 'Lock position', icon: I.lock, hint: '⇧⌘L', action: () => toggleLock() },
+      'sep',
       { label: `New project from ${n > 1 ? plural(n, 'item') : 'selection'}`, icon: I.newProject, action: projectFromSelection },
       { label: 'Bring to front', icon: I.front, hint: ']', action: () => { record(); bringToFront([...state.sel]); } },
       { label: 'Send to back', icon: I.back, hint: '[', action: () => { record(); sendToBack([...state.sel]); } },
@@ -1945,6 +2249,8 @@
   const SHORTCUTS = [
     ['Tools', [['V', 'Select'], ['H  or hold Space', 'Pan'], ['A', 'Draw an arrow'], ['Esc', 'Clear selection']]],
     ['Canvas', [['⌘ + scroll / pinch', 'Zoom'], ['+  −', 'Zoom in / out'], ['⇧0', 'Zoom to 100%'], ['⇧1', 'Fit everything'], ['L', 'Back to last edited'], ['⌘\\', 'Show / hide projects']]],
+    ['Add', [['T', 'Text'], ['U', 'Upload image or video'], ['K', 'Link'], ['A', 'Arrow']]],
+    ['Arrange', [['⌥A  ⌥H  ⌥D', 'Align left / centre / right'], ['⌥W  ⌥V  ⌥S', 'Align top / middle / bottom'], ['⇧⌘L', 'Lock / unlock'], ['← → ↑ ↓', 'Nudge (⇧ for 10)'], ['⌘ + drag', 'Move without snapping']]],
     ['Items', [['↵', 'Edit selected text'], ['⌘C  ⌘X  ⌘V', 'Copy, cut, paste'], ['⌘Z  ⇧⌘Z', 'Undo, redo'], ['⌘D', 'Duplicate'], [']  [', 'Bring to front / send to back'], ['⌥ + drag', 'Duplicate while dragging'], ['⇧ + drag', 'Snap to the dots'], ['⌘A', 'Select all'], ['⌫', 'Delete']]],
   ];
   function openShortcuts() {
@@ -1965,7 +2271,7 @@
     const title = source === 'file' ? `Add ${kind === 'image' ? 'Image' : 'Video'}` : 'Add Link';
     const sub = source === 'file'
       ? (kind === 'image' ? 'Upload an image (PNG, JPG, GIF, WebP…) from your computer.' : 'Upload a video (MP4, WebM, MOV…) from your computer.')
-      : 'Paste a link to an image or video — YouTube, Vimeo, Instagram or a direct file. DOT works out which it is.';
+      : 'Paste a link to an image or video — YouTube, Vimeo, Instagram, Pinterest or a direct file. DOT works out which it is.';
 
     modal.innerHTML = `
       <form class="modal" autocomplete="off">
@@ -2024,13 +2330,21 @@
         const my = ++seq;
         err.textContent = ''; preview.hidden = true; payload = null; submit.disabled = true;
         if (!isHttpUrl(url)) { if (url) err.textContent = 'Enter a full link starting with https://'; return; }
-        const ready = (k, node, name, meta) => {
+        const ready = (k, node, name, meta, src = url) => {
           if (my !== seq) return;
-          payload = { kind: k, url, name: url };
+          payload = { kind: k, url: src, name: url };
           showPreview(node, name, meta);
           submit.disabled = false;
         };
         const v = parseVideo(url);
+        if (isPinShort(url)) { err.textContent = 'Short pin.it links can’t be read. Open the pin and copy its pinterest.com/pin/… link.'; return; }
+        const pin = pinId(url);
+        if (pin) {
+          preview.hidden = false; thumb.innerHTML = ''; preview.querySelector('b').textContent = 'Getting the pin…'; preview.querySelector('span').textContent = 'Pinterest';
+          pinImage(pin).then(loadFirst).then(img => ready('image', img, 'Pinterest pin', `${img.naturalWidth} × ${img.naturalHeight}`, img.src))
+            .catch(() => { if (my === seq) { preview.hidden = true; err.textContent = "Couldn't get that pin's image. It may be private or removed."; } });
+          return;
+        }
         if (igCode(url)) {
           const reel = /\/(reels?|tv)\//.test(url);
           return ready(reel ? 'video' : 'image', Object.assign(document.createElement('div'), { className: 'ig-mark', innerHTML: reel ? I.video : I.image }), reel ? 'Instagram reel' : 'Instagram post', 'Shows as the post’s preview on the canvas');
@@ -2143,13 +2457,14 @@
   // Clicking anywhere outside the panel (except menus and dialogs) closes it.
   document.addEventListener('pointerdown', e => {
     if (shell.classList.contains('collapsed')) return;
-    if (e.target.closest('#panel, #dotBtn, .toolbar, #shapePop, .ctx, .modal-backdrop, .toast')) return;
+    if (e.target.closest('#panel, #dotBtn, .toolbar, #shapePop, #textPop, #selbar, .ctx, .modal-backdrop, .toast')) return;
     setCollapsed(true);
   }, true);
   // New project / folder from the bar: open the panel first so the name can be typed in place.
   $('#panelShortcuts').onclick = () => { setCollapsed(true); openShortcuts(); };
 
   const typing = t => t.closest?.('input, textarea') || t.isContentEditable;
+  let lastNudge = 0;
   document.addEventListener('keydown', e => {
     if (typing(e.target)) return;
     if (e.key === 'Escape') { if (!shell.classList.contains('collapsed') && ctx.hidden && modal.hidden) return setCollapsed(true); closeCtx(); closeShapes(); closeModal(); closeLightbox(); setSelection([]); if (state.tool === 'line') setTool('select'); return; }
@@ -2162,6 +2477,22 @@
       if (e.key.toLowerCase() === 'z') { e.preventDefault(); e.shiftKey ? redo() : undo(); }
       if (e.key.toLowerCase() === 'y' && e.ctrlKey) { e.preventDefault(); redo(); }
       if (e.key === '\\') { e.preventDefault(); togglePanel(); }
+      if (e.shiftKey && e.code === 'KeyL' && state.sel.size) { e.preventDefault(); toggleLock(); }
+      return;
+    }
+    if (e.altKey && state.sel.size) {                             // ⌥ + A D H / W S V: align
+      const k = Object.keys(ALIGN).find(k => e.code === 'Key' + ALIGN[k].key);
+      if (k) { e.preventDefault(); return alignSelected(k); }
+    }
+    if (e.key.startsWith('Arrow') && state.sel.size) {             // nudge: 1 unit, Shift for 10
+      e.preventDefault();
+      const d = e.shiftKey ? 10 : 1, its = selectedItems().filter(i => !i.locked);
+      if (!its.length) return;
+      if (Date.now() - lastNudge > 800) record();
+      lastNudge = Date.now();
+      const [dx, dy] = { ArrowLeft: [-d, 0], ArrowRight: [d, 0], ArrowUp: [0, -d], ArrowDown: [0, d] }[e.key];
+      its.forEach(it => shiftItem(it, dx, dy));
+      touch(its[its.length - 1].id);
       return;
     }
     if ((e.key === 'Delete' || e.key === 'Backspace') && state.sel.size) { e.preventDefault(); removeSelected(); }
@@ -2177,6 +2508,9 @@
     else if (e.key === 'v' || e.key === 'V') setTool('select');
     else if (e.key === 'h' || e.key === 'H') setTool('hand');
     else if (e.key === 'a' || e.key === 'A') setTool('line');
+    else if (e.key === 't' || e.key === 'T') addTextAt('paragraph');
+    else if (e.key === 'u' || e.key === 'U') uploadInput.click();
+    else if (e.key === 'k' || e.key === 'K') openAddModal(null, 'link', viewCenter());
     else if (e.key === '?') openShortcuts();
     else if (e.key === 'l' || e.key === 'L') goToLastEdited();
   });
