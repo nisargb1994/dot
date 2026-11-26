@@ -18,8 +18,8 @@ An infinite dotted canvas for projects: arrange images, videos, text, shapes and
 - Select several items and drag the corner of the dashed box to scale them together.
 - Instagram post and reel links show the post's preview. Pinterest pin links (pinterest.com/pin/…) show the pin's image.
 - The toolbar on the left: Select, Hand, Arrow, Text (T), Shapes, Upload (U) and Link (K).
-- Selecting anything shows a bar above it: align left / centre / right / top / middle / bottom (⌥A ⌥H ⌥D ⌥W ⌥V ⌥S), space evenly (3+ items), lock, front/back, duplicate, delete and more. One item aligns to the shape it sits on, or to the view.
-- Lock (⇧⌘L, or the lock at an item's bottom-left corner) keeps items in place: they can't be moved, resized or deleted, and dragging on them selects around them.
+- Selecting anything shows a small bar: **Text** or **Colour** (style), **Arrange** (align, space evenly, front / back — ⌥A ⌥H ⌥D ⌥W ⌥V ⌥S), lock, duplicate, delete and **⋯** for everything else. One item aligns to the shape it sits on, or to the screen.
+- Lock (the bar's lock, or ⇧⌘L) keeps items in place: they can't be moved, resized or deleted, and dragging on them selects around them. Locked items show a small lock at their bottom-left — click it to unlock.
 - Moving and resizing snap to the edges and centres of other items (pink guides); hold ⌘ to move freely. Arrow keys nudge (Shift for 10).
 - Right-click a project → **Share project** to get a link. Opening it on any computer adds a copy of the project there (a snapshot; share again to send updates). Shared projects are stored in Supabase Storage (bucket `dot-shares`) and anyone with the link can view them.
 - ⌘Z / ⇧⌘Z undo and redo. ⌘C / ⌘V / ⌘X / ⌘D copy, paste, cut and duplicate. Press L to jump back to the last thing you edited.

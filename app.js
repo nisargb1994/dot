@@ -862,10 +862,9 @@
     if (!gb) {
       gb = document.createElement('div');
       gb.className = 'group-box';
-      gb.innerHTML = `<div class="handle group-handle" title="Drag to scale the selection · Shift snaps to the dots">${I.resize}</div><div class="lock-btn" title="Lock / unlock position  ⇧⌘L">${I.unlock}${I.lock}</div>`;
+      gb.innerHTML = `<div class="handle group-handle" title="Drag to scale the selection · Shift snaps to the dots">${I.resize}</div>`;
       world.append(gb);
     }
-    gb.classList.toggle('locked', its.every(i => i.locked));
     const G = groupAabb(its);
     Object.assign(gb.style, { left: G.x + 'px', top: G.y + 'px', width: G.w + 'px', height: G.h + 'px' });
   }
@@ -981,25 +980,50 @@
   /* ---------------- Selection bar: quick actions above whatever is selected ---------------- */
   const selbar = $('#selbar');
   let selbarSig = '';
+  // Small dropdowns that hang off the bar: each is a short, labelled list of choices.
+  const arrangeEntries = () => {
+    const n = state.sel.size, ids = () => [...state.sel];
+    const row = keys => keys.map(k => ({ title: `${ALIGN[k].label}  ⌥${ALIGN[k].key}`, icon: I[ALIGN[k].icon], action: () => alignSelected(k) }));
+    return [
+      { heading: n > 1 ? 'Line up with each other' : 'Align to the shape it sits on, or the screen' },
+      { label: 'Sideways', row: row(['left', 'hcenter', 'right']) },
+      { label: 'Up / down', row: row(['top', 'middle', 'bottom']) },
+      ...(n > 2 ? [{ label: 'Space evenly', row: [
+        { title: 'Space evenly across', icon: I.distH, action: () => distribute('x') },
+        { title: 'Space evenly down', icon: I.distV, action: () => distribute('y') }] }] : []),
+      'sep',
+      { label: 'Layer', row: [
+        { title: 'Bring to front  ]', icon: I.front, action: () => { record(); bringToFront(ids()); } },
+        { title: 'Send to back  [', icon: I.back, action: () => { record(); sendToBack(ids()); } }] },
+    ];
+  };
+  const styleEntries = () => {
+    const its = selectedItems();
+    if (its.some(i => i.kind === 'text')) return textStyleEntries();
+    const shapes = its.filter(i => i.kind === 'shape'), fills = new Set(shapes.map(i => i.fill || 'grey'));
+    return [{ label: 'Colour', swatch: true, row: Object.entries(SHAPE_FILLS).map(([k, f]) => ({ title: f.label, icon: fillSwatch(f), active: fills.size === 1 && fills.has(k), action: () => setShapeFill(k) })) }];
+  };
   function renderSelbar(its = selectedItems()) {
     if (!its.length || stage.classList.contains('editing-text')) { selbar.hidden = true; selbarSig = ''; return; }
-    const n = its.length, allLocked = its.every(i => i.locked);
-    const sig = `${n > 2 ? 3 : n}:${allLocked}`;
+    const allLocked = its.every(i => i.locked);
+    const texts = its.filter(i => i.kind === 'text'), shapes = its.filter(i => i.kind === 'shape');
+    const tKey = texts.length ? (new Set(texts.map(i => i.tstyle || 'dark')).size === 1 ? texts[0].tstyle || 'dark' : 'mixed') : '';
+    const fKey = !texts.length && shapes.length ? (new Set(shapes.map(i => i.fill || 'grey')).size === 1 ? shapes[0].fill || 'grey' : 'mixed') : '';
+    const sig = `${its.length > 1}:${allLocked}:${tKey}:${fKey}`;
     if (sig !== selbarSig) {
       selbarSig = sig;
-      const to = n > 1 ? '' : ' (to the shape under it, or the view)';
-      const b = (act, icon, title, cls = '') => `<button class="sb${cls}" data-act="${act}" title="${title}" aria-label="${title.split('  ')[0]}">${icon}</button>`;
+      const b = (act, inner, title, cls = '') => `<button class="sb${cls}" data-act="${act}" title="${title}" aria-label="${title.split('  ')[0]}">${inner}</button>`;
+      const drop = (act, icon, text, title) => b(act, `${icon}<span class="sb-t">${text}</span>${I.chevron}`, title, ' sb-drop');
+      const style = tKey ? drop('style', swatch(TEXT_STYLES[tKey] || TEXT_STYLES.dark), 'Text', 'Text type and style')
+        : fKey ? drop('style', fillSwatch(SHAPE_FILLS[fKey] || SHAPE_FILLS.grey), 'Colour', 'Shape colour') : '';
       selbar.innerHTML = [
-        ...Object.entries(ALIGN).map(([k, a]) => b(k, I[a.icon], `${a.label}${to}  ⌥${a.key}`)),
-        ...(n > 2 ? ['<span class="sb-sep"></span>', b('distX', I.distH, 'Space evenly across'), b('distY', I.distV, 'Space evenly down')] : []),
+        style,
+        drop('arrange', I.aL, 'Arrange', 'Align, space evenly, front / back'),
         '<span class="sb-sep"></span>',
         b('lock', allLocked ? I.lock : I.unlock, allLocked ? 'Unlock  ⇧⌘L' : 'Lock position  ⇧⌘L', allLocked ? ' on' : ''),
-        b('front', I.front, 'Bring to front  ]'),
-        b('back', I.back, 'Send to back  ['),
-        '<span class="sb-sep"></span>',
         b('dup', I.duplicate, 'Duplicate  ⌘D'),
         b('del', I.trash, 'Delete  ⌫'),
-        b('more', I.more, 'More options'),
+        b('more', I.more, 'More'),
       ].join('');
     }
     selbar.hidden = false;
@@ -1017,14 +1041,14 @@
   selbar.addEventListener('click', e => {
     const b = e.target.closest('[data-act]');
     if (!b) return;
-    const a = b.dataset.act;
-    if (ALIGN[a]) return alignSelected(a);
-    if (a === 'distX' || a === 'distY') return distribute(a === 'distX' ? 'x' : 'y');
+    const a = b.dataset.act, r = b.getBoundingClientRect();
+    const pop = entries => { if (!ctx.hidden && ctx.dataset.from === a) return closeCtx(); openCtx(r.left, r.bottom + 8, entries); ctx.dataset.from = a; };
     if (a === 'lock') return toggleLock();
-    if (a === 'front' || a === 'back') { record(); return (a === 'front' ? bringToFront : sendToBack)([...state.sel]); }
     if (a === 'dup') return duplicate();
     if (a === 'del') return removeSelected();
-    if (a === 'more') { const r = b.getBoundingClientRect(); openCtx(r.left, r.bottom + 8, selectionEntries()); }
+    if (a === 'arrange') return pop(arrangeEntries());
+    if (a === 'style') return pop(styleEntries());
+    if (a === 'more') return pop(selectionEntries());
   });
 
   /* ---------------- Lines / arrows ---------------- */
@@ -1230,10 +1254,10 @@
     rh.className = 'rot-handle';
     rh.title = 'Drag to rotate · Shift for 15° steps';
     rh.innerHTML = I.rotate;
-    // Bottom-left: lock the item in place (shown when selected, or on hover once locked).
+    // Bottom-left badge on locked items; click it to unlock.
     const lk = document.createElement('div');
     lk.className = 'lock-btn';
-    lk.title = 'Lock / unlock position  ⇧⌘L';
+    lk.title = 'Locked — click to unlock';
     lk.innerHTML = I.unlock + I.lock;
     el.append(h, rh, lk);
     el.classList.toggle('locked', !!it.locked);
@@ -2094,13 +2118,13 @@
   /* ---------------- Context menu ---------------- */
   const ctx = $('#ctx');
   function openCtx(x, y, entries) {
-    ctx.innerHTML = '';
+    ctx.innerHTML = ''; ctx.dataset.from = '';
     for (const en of entries) {
       if (en === 'sep') { ctx.insertAdjacentHTML('beforeend', '<div class="ctx-sep"></div>'); continue; }
       if (en.heading) { const h = document.createElement('div'); h.className = 'ctx-label'; h.textContent = en.heading; ctx.append(h); continue; }
       if (en.row) {                                      // a compact row of icon choices, e.g. text alignment
         const r = document.createElement('div');
-        r.className = 'ctx-row';
+        r.className = 'ctx-row' + (en.swatch ? ' swatches' : '');
         r.innerHTML = '<span class="ctx-row-label"></span>';
         r.firstChild.textContent = en.label;
         for (const c of en.row) {
@@ -2134,47 +2158,35 @@
   const textStyleEntries = () => {
     const texts = selectedItems().filter(i => i.kind === 'text');
     if (!texts.length) return [];
-    const current = new Set(texts.map(i => i.tstyle || 'dark'));
-    const only = (key, v) => { const s = new Set(texts.map(i => i[key] || (key === 'align' ? 'left' : ''))); return s.size === 1 && s.has(v); };
+    const only = (key, v, d) => { const s = new Set(texts.map(i => i[key] || d)); return s.size === 1 && s.has(v); };
     return [
-      { label: 'Type', row: Object.entries(TEXT).map(([v, t]) => ({ title: t.label, icon: I[v], active: only('variant', v), action: () => setTextVariant(v) })) },
-      { label: 'Align', row: ALIGNS.map(a => ({ title: `Align ${a}`, icon: I['align' + a[0].toUpperCase() + a.slice(1)], active: only('align', a), action: () => setTextAlign(a) })) },
+      { label: 'Type', row: Object.entries(TEXT).map(([v, t]) => ({ title: t.label, icon: I[v], active: only('variant', v, ''), action: () => setTextVariant(v) })) },
+      { label: 'Style', swatch: true, row: Object.entries(TEXT_STYLES).map(([k, st]) => ({ title: st.label, icon: swatch(st), active: only('tstyle', k, 'dark'), action: () => setTextStyle(k) })) },
+      { label: 'Text align', row: ALIGNS.map(a => ({ title: `Align text ${a}`, icon: I['align' + a[0].toUpperCase() + a.slice(1)], active: only('align', a, 'left'), action: () => setTextAlign(a) })) },
       texts.every(i => i.todo)
         ? { label: 'Remove checkboxes', icon: I.todo, action: () => setTodo(false) }
         : { label: 'Make to-do list', icon: I.todo, action: () => setTodo(true) },
-      'sep',
-      { heading: 'Text style' },
-      ...Object.entries(TEXT_STYLES).map(([key, st]) => ({
-        label: st.label, icon: swatch(st), hint: current.size === 1 && current.has(key) ? '✓' : '',
-        action: () => setTextStyle(key),
-      })),
-      'sep',
     ];
   };
+  // The full list for a selection: style first, then edit, then position, then delete.
   const selectionEntries = () => {
-    const n = state.sel.size;
-    const shapes = selectedItems().filter(i => i.kind === 'shape');
-    const fills = new Set(shapes.map(i => i.fill || 'grey'));
+    const n = state.sel.size, its = selectedItems(), ids = () => [...state.sel];
+    const styled = its.some(i => i.kind === 'text' || i.kind === 'shape');
     return [
-      ...textStyleEntries(),
-      ...(shapes.length ? [{ label: 'Colour', row: Object.entries(SHAPE_FILLS).map(([k, f]) => ({ title: f.label, icon: fillSwatch(f), active: fills.size === 1 && fills.has(k), action: () => setShapeFill(k) })) }, 'sep'] : []),
+      ...(styled ? [...styleEntries(), 'sep'] : []),
       { label: 'Duplicate', icon: I.duplicate, hint: '⌘D', action: duplicate },
       { label: 'Copy', icon: I.copy, hint: '⌘C', action: () => copySelection() },
       { label: 'Cut', icon: I.cut, hint: '⌘X', action: () => { if (copySelection(true)) { toast(`Cut ${plural(clipboard.length, 'item')} — ⌘V to paste`); removeSelected(); } } },
       'sep',
-      ...(selectedItems().some(i => i.kind !== 'line') ? [{ label: 'Rotate 90°', icon: I.rotate, action: () => rotateSelected(90) }] : []),
-      ...(selectedItems().some(i => i.rot) ? [{ label: 'Reset rotation', icon: I.resetRot, action: () => rotateSelected(0, true) }] : []),
-      { label: 'Arrange', row: Object.entries(ALIGN).map(([k, a]) => ({ title: `${a.label}  ⌥${a.key}`, icon: I[a.icon], action: () => alignSelected(k) })) },
-      ...(n > 2 ? [{ label: 'Space evenly', row: [
-        { title: 'Space evenly across', icon: I.distH, action: () => distribute('x') },
-        { title: 'Space evenly down', icon: I.distV, action: () => distribute('y') }] }] : []),
-      selectedItems().every(i => i.locked)
+      its.every(i => i.locked)
         ? { label: 'Unlock', icon: I.unlock, hint: '⇧⌘L', action: () => toggleLock() }
         : { label: 'Lock position', icon: I.lock, hint: '⇧⌘L', action: () => toggleLock() },
-      'sep',
-      { label: `New project from ${n > 1 ? plural(n, 'item') : 'selection'}`, icon: I.newProject, action: projectFromSelection },
-      { label: 'Bring to front', icon: I.front, hint: ']', action: () => { record(); bringToFront([...state.sel]); } },
-      { label: 'Send to back', icon: I.back, hint: '[', action: () => { record(); sendToBack([...state.sel]); } },
+      { label: 'Layer', row: [
+        { title: 'Bring to front  ]', icon: I.front, action: () => { record(); bringToFront(ids()); } },
+        { title: 'Send to back  [', icon: I.back, action: () => { record(); sendToBack(ids()); } }] },
+      ...(its.some(i => i.rot) ? [{ label: 'Reset rotation', icon: I.resetRot, action: () => rotateSelected(0, true) }]
+        : its.some(i => i.kind !== 'line') ? [{ label: 'Rotate 90°', icon: I.rotate, action: () => rotateSelected(90) }] : []),
+      { label: n > 1 ? `Copy ${plural(n, 'item')} to a new project` : 'Copy to a new project', icon: I.newProject, action: projectFromSelection },
       'sep',
       { label: n > 1 ? `Delete ${plural(n, 'item')}` : 'Delete', icon: I.trash, hint: '⌫', danger: true, action: removeSelected },
     ];
